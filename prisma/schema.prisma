@@ -1,0 +1,202 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+  binaryTargets   = ["native", "darwin", "darwin-arm64"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Single-row table holding company profile, bank details, invoice defaults.
+model Settings {
+  id                 Int    @id @default(1)
+  companyName        String @default("THE MANGO THEORY")
+  addressLine1       String @default("")
+  addressLine2       String @default("")
+  addressLine3       String @default("")
+  sacCode            String @default("")
+  gstin              String @default("")
+  pan                String @default("")
+  bankAccName        String @default("")
+  bankName           String @default("")
+  bankAccNo          String @default("")
+  ifsc               String @default("")
+  upiId              String @default("")
+  termsAndConditions String @default("1. GST under Reverse Charge Mechanism: GST is not payable under the Reverse Charge Mechanism (RCM).\n2. Payment Terms: Payment must be made in full on or before the due date specified in the invoice. In the event of delayed payment, interest at the rate of 24% per annum may be charged on the outstanding amount from the due date until the date of actual payment.\n3. Cheque Return Charges: In the event of a bank cheque being returned or dishonoured, the recipient/customer shall be liable to pay Rs. 500/- towards cheque return and related bank charges.\n4. TDS Deduction: Where applicable, TDS may be deducted at the rate of 2% under Section 194C of the Income Tax Act, 1961, calculated on the taxable value of the invoice, excluding the Goods and Services Tax (GST) component. The applicable TDS certificate shall be provided by the recipient/customer within the prescribed period.\n5. Amendment of Terms: We reserve the right to modify, amend, or update these Terms & Conditions from time to time without prior notice. The revised terms shall be applicable from the date of such amendment.")
+  paymentTermsDays   Int    @default(30)
+  storagePath        String @default("./storage/invoices")
+  brandColor         String  @default("#134F5C")
+  logoPath           String?
+  // Stored the same way as logoPath: a data: URI directly in the DB, not a file on disk.
+  signaturePath       String?
+  // Free-tier Gemini API key, used to auto-extract data from uploaded Purchase bill PDFs.
+  geminiApiKey        String  @default("")
+  // Which Gemini model to call — editable here so a model retirement/rename on Google's side
+  // can be fixed from Settings, without needing a code change and redeploy.
+  geminiModel          String  @default("gemini-3.6-flash")
+}
+
+// Auto-numbering counters, one row per (type, financial year).
+model Counter {
+  id         String @id @default(cuid())
+  type       String // "SALES" | "PURCHASE"
+  fy         String // e.g. "25-26"
+  lastNumber Int    @default(0)
+
+  @@unique([type, fy])
+}
+
+// Clients/Agencies (billed - Sales side) and Creators (paid - Purchase side).
+model Party {
+  id          String   @id @default(cuid())
+  type        String // "CLIENT" | "CREATOR"
+  name        String
+  gstin       String?
+  panNo       String?
+  address     String?
+  email       String?
+  phone       String?
+  pageHandle  String?
+  bankAccName String?
+  bankName    String?
+  bankAccNo   String?
+  ifsc        String?
+  upiId       String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  salesInvoices    Invoice[]        @relation("ClientInvoices")
+  purchaseInvoices Invoice[]        @relation("CreatorInvoices")
+  invoiceCreators  InvoiceCreator[]
+
+  @@index([type])
+}
+
+model Invoice {
+  id           String    @id @default(cuid())
+  type         String // "SALES" | "PURCHASE"
+  number       String // e.g. "001/25-26"
+  fy           String // "25-26"
+  date         DateTime
+  billingDate1 DateTime?
+  billingDate2 DateTime?
+  month        String // "Aug" - month of `date`, for register + folder grouping
+  dueDate      DateTime?
+
+  clientId  String?
+  client    Party?  @relation("ClientInvoices", fields: [clientId], references: [id])
+  creatorId String? // for PURCHASE invoices: the creator being paid
+  creator   Party?  @relation("CreatorInvoices", fields: [creatorId], references: [id])
+
+  collaborationBrand String?
+  billAmount         Decimal @default(0)
+  gstAmount          Decimal @default(0)
+  reimbursements     Decimal @default(0)
+  totalAmount        Decimal @default(0)
+
+  status     String  @default("UNPAID") // UNPAID | PARTIAL | PAID
+  amountPaid Decimal @default(0)
+  // Sum of TDS withheld by the payer across this invoice's payments — not cash you'll ever
+  // receive, but counts toward the invoice being settled (you claim it back as an income-tax
+  // credit via Form 26AS / the payer's TDS certificate).
+  tdsDeducted Decimal @default(0)
+
+  termsAndConditions String?
+  notes              String?
+  pdfPath            String?
+  // For PURCHASE bills: the creator/vendor's own invoice number from their bill — separate
+  // from `number`, which is always our own auto-allocated sequence. Auto-filled by the Gemini
+  // PDF extraction, but purely a reference field (never used for lookups/uniqueness).
+  vendorInvoiceNumber String?
+  // True when this PURCHASE bill came from an uploaded vendor PDF (manual entry or the
+  // extract flow) — the original file is what's filed to Drive as the record, so the app
+  // never generates its own PDF for these. False (manual entry, no upload) still gets a
+  // generated fallback PDF, since there's nothing else to show.
+  hasSourcePdf         Boolean @default(false)
+
+  linkedSalesInvoiceId String? // for PURCHASE invoices generated from a SALES invoice
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lineItems LineItem[]
+  creators  InvoiceCreator[]
+  payments  Payment[]
+
+  @@index([type, fy])
+  @@index([status])
+  @@index([month, fy])
+}
+
+model LineItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  link1       String?
+  link2       String?
+  qty         Decimal @default(1)
+  rate        Decimal @default(0)
+  amount      Decimal @default(0)
+  sortOrder   Int     @default(0)
+}
+
+// Creator reference rows on a SALES invoice (who the campaign work involved).
+model InvoiceCreator {
+  id         String  @id @default(cuid())
+  invoiceId  String
+  invoice    Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  partyId    String?
+  party      Party?  @relation(fields: [partyId], references: [id])
+  name       String
+  address    String?
+  email      String?
+  phone      String?
+  pageHandle String?
+  gstNumber  String?
+  link1      String?
+  link2      String?
+  amount     Decimal @default(0) // amount owed to this creator (for purchase-bill generation)
+  sortOrder  Int     @default(0)
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  invoiceId String
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  date      DateTime
+  amount    Decimal
+  // TDS the payer withheld as part of settling this invoice with this payment — separate from
+  // `amount` (actual cash received) so a bank-statement match only ever needs to account for
+  // the cash portion, not the invoice total.
+  tdsAmount Decimal @default(0)
+  method    String?
+  reference String?
+  notes     String?
+  createdAt DateTime @default(now())
+}
+
+model SheetSyncConfig {
+  id                 Int     @id @default(1)
+  spreadsheetId      String  @default("")
+  salesSheetName     String  @default("Sales Register")
+  purchaseSheetName  String  @default("Purchase Register")
+  commissionSheetName String @default("Commission Register")
+  // Full service account JSON key content, pasted directly — not a filesystem path, since
+  // this needs to work on serverless hosting (Vercel) with no persistent disk, as well as
+  // the local Mac app.
+  serviceAccountJson String  @default("")
+  enabled            Boolean @default(false)
+  // Root Google Drive folder (shared with the same service account, Editor access) that every
+  // generated invoice PDF gets filed into, under Type/FY subfolders. Empty = Drive sync off,
+  // independent of the Sheets sync `enabled` flag above (both share the one service account).
+  driveFolderId      String  @default("")
+}
+
+model User {
+  id           Int    @id @default(1)
+  passwordHash String
+}

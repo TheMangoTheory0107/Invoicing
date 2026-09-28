@@ -1,0 +1,80 @@
+#!/bin/bash
+# Double-click launcher: starts the invoicing app in the background (no visible terminal)
+# and opens it in your browser. Safe to double-click again any time — if it's already
+# running, this just opens the browser.
+#
+# This build ships with everything already installed and built, so there is no
+# npm install / npm run build step here — just start the pre-built server.
+
+# This .app is expected to live directly inside the project folder (next to package.json).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_BUNDLE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_DIR="$(cd "$APP_BUNDLE_DIR/.." && pwd)"
+
+LOG_FILE="$PROJECT_DIR/launcher.log"
+SERVER_LOG="$PROJECT_DIR/server.log"
+PID_FILE="$PROJECT_DIR/.server.pid"
+
+exec >"$LOG_FILE" 2>&1
+echo "=== Launch at $(date) ==="
+
+# GUI-launched apps on macOS get a minimal PATH that often excludes Homebrew/nvm Node installs.
+export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+if [ -d "$HOME/.nvm/versions/node" ]; then
+  NVM_BIN="$(ls -d "$HOME"/.nvm/versions/node/*/bin 2>/dev/null | sort -V | tail -1)"
+  [ -n "$NVM_BIN" ] && export PATH="$NVM_BIN:$PATH"
+fi
+
+show_error() {
+  osascript -e "display dialog \"$1\" buttons {\"OK\"} with icon stop with title \"TheMangoTheory Invoicing\"" >/dev/null 2>&1
+}
+
+notify() {
+  osascript -e "display notification \"$1\" with title \"TheMangoTheory Invoicing\"" >/dev/null 2>&1
+}
+
+if ! command -v node >/dev/null 2>&1; then
+  show_error "Node.js isn't installed.\n\nPlease install it from nodejs.org (choose the LTS version), then double-click this app again."
+  exit 1
+fi
+
+cd "$PROJECT_DIR" || { show_error "Could not find the app folder."; exit 1; }
+
+# Already running? Just open the browser.
+if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  open http://localhost:3000
+  exit 0
+fi
+
+if [ ! -d node_modules ] || [ ! -d .next ]; then
+  show_error "This copy of the app folder is missing its installed files (node_modules or .next). Please re-download the full package rather than just the code — everything should already be included, nothing to install."
+  exit 1
+fi
+
+if [ ! -f .env ]; then
+  SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
+  if ! printf 'DATABASE_URL="file:./dev.db"\nSESSION_SECRET="%s"\n' "$SECRET" > .env 2>>"$LOG_FILE"; then
+    show_error "Couldn't write a settings file (.env) into this folder — likely a macOS permissions restriction. Try moving this whole folder to your Home folder (not Desktop/Documents/Downloads) and opening it from there."
+    exit 1
+  fi
+fi
+
+nohup env NODE_ENV=production node node_modules/next/dist/bin/next start >"$SERVER_LOG" 2>&1 &
+echo $! > "$PID_FILE"
+
+# Wait for the server to come up.
+READY=0
+for i in $(seq 1 30); do
+  if curl -s -o /dev/null http://localhost:3000/login; then
+    READY=1
+    break
+  fi
+  sleep 1
+done
+
+if [ "$READY" != "1" ]; then
+  show_error "The app didn't start in time. Check launcher.log and server.log in the app folder, or try double-clicking again."
+  exit 1
+fi
+
+open http://localhost:3000

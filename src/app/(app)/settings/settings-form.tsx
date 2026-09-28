@@ -1,0 +1,233 @@
+"use client";
+
+import { useState } from "react";
+import type { Settings } from "@prisma/client";
+import LogoUpload from "./logo-upload";
+
+function Field({
+  label,
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
+  return (
+    <label className="block">
+      <span className="block text-xs font-medium text-slate-600 mb-1">{label}</span>
+      <input
+        {...props}
+        className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+      />
+    </label>
+  );
+}
+
+export default function SettingsForm({ settings }: { settings: Settings }) {
+  const [form, setForm] = useState({
+    companyName: settings.companyName,
+    addressLine1: settings.addressLine1,
+    addressLine2: settings.addressLine2,
+    addressLine3: settings.addressLine3,
+    sacCode: settings.sacCode,
+    gstin: settings.gstin,
+    pan: settings.pan,
+    bankAccName: settings.bankAccName,
+    bankName: settings.bankName,
+    bankAccNo: settings.bankAccNo,
+    ifsc: settings.ifsc,
+    upiId: settings.upiId,
+    termsAndConditions: settings.termsAndConditions,
+    paymentTermsDays: settings.paymentTermsDays,
+    storagePath: settings.storagePath,
+    brandColor: settings.brandColor,
+    geminiApiKey: settings.geminiApiKey,
+    geminiModel: settings.geminiModel,
+  });
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
+    const res = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      setError("Could not save settings.");
+      return;
+    }
+    setSavedAt(Date.now());
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="bg-white border border-slate-200 rounded-lg p-6 space-y-6">
+      <div>
+        <h2 className="text-sm font-semibold text-slate-800 mb-3">Company profile</h2>
+        <div className="grid grid-cols-2 gap-4">
+          <Field
+            label="Company name"
+            value={form.companyName}
+            onChange={(e) => set("companyName", e.target.value)}
+            required
+          />
+          <Field label="SAC code" value={form.sacCode} onChange={(e) => set("sacCode", e.target.value)} />
+          <Field
+            label="Address line 1"
+            value={form.addressLine1}
+            onChange={(e) => set("addressLine1", e.target.value)}
+          />
+          <Field
+            label="Address line 2"
+            value={form.addressLine2}
+            onChange={(e) => set("addressLine2", e.target.value)}
+          />
+          <Field
+            label="Address line 3"
+            value={form.addressLine3}
+            onChange={(e) => set("addressLine3", e.target.value)}
+          />
+          <Field label="GSTIN" value={form.gstin} onChange={(e) => set("gstin", e.target.value)} />
+          <Field label="PAN" value={form.pan} onChange={(e) => set("pan", e.target.value)} />
+          <Field
+            label="Default payment terms (days)"
+            type="number"
+            min={0}
+            value={form.paymentTermsDays}
+            onChange={(e) => set("paymentTermsDays", parseInt(e.target.value) || 0)}
+          />
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold text-slate-800 mb-3">
+          Bank details (shown on your Sales invoices, for clients to pay you)
+        </h2>
+        <div className="grid grid-cols-2 gap-4">
+          <Field
+            label="Account name"
+            value={form.bankAccName}
+            onChange={(e) => set("bankAccName", e.target.value)}
+          />
+          <Field label="Bank name" value={form.bankName} onChange={(e) => set("bankName", e.target.value)} />
+          <Field
+            label="Account number"
+            value={form.bankAccNo}
+            onChange={(e) => set("bankAccNo", e.target.value)}
+          />
+          <Field label="IFSC" value={form.ifsc} onChange={(e) => set("ifsc", e.target.value)} />
+          <Field label="UPI ID" value={form.upiId} onChange={(e) => set("upiId", e.target.value)} />
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold text-slate-800 mb-3">Invoice defaults</h2>
+        <label className="block">
+          <span className="block text-xs font-medium text-slate-600 mb-1">
+            Default terms and conditions
+          </span>
+          <textarea
+            value={form.termsAndConditions}
+            onChange={(e) => set("termsAndConditions", e.target.value)}
+            rows={3}
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </label>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold text-slate-800 mb-3">Branding</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Controls the accent color and logo used on every invoice PDF.
+        </p>
+        <div className="grid grid-cols-2 gap-4 items-start">
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-600 mb-1">Accent color</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={form.brandColor}
+                onChange={(e) => set("brandColor", e.target.value)}
+                className="h-9 w-12 rounded border border-slate-300 cursor-pointer"
+              />
+              <input
+                value={form.brandColor}
+                onChange={(e) => set("brandColor", e.target.value)}
+                className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm font-mono"
+              />
+            </div>
+          </label>
+          <LogoUpload initialLogoPath={settings.logoPath} />
+          <LogoUpload
+            initialLogoPath={settings.signaturePath}
+            label="Signature"
+            apiPath="/api/settings/signature"
+            emptyLabel="No signature"
+          />
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold text-slate-800 mb-3">Purchase bill auto-read</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Paste a free Gemini API key (from{" "}
+          <a
+            href="https://aistudio.google.com/apikey"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            aistudio.google.com/apikey
+          </a>
+          ) to let the app read uploaded Purchase bill PDFs automatically and fill in the invoice
+          number, creator, amount, and dates for you.
+        </p>
+        <Field
+          label="Gemini API key"
+          type="password"
+          value={form.geminiApiKey}
+          onChange={(e) => set("geminiApiKey", e.target.value)}
+          placeholder="AIza…"
+        />
+        <div className="mt-3">
+          <Field
+            label="Gemini model"
+            value={form.geminiModel}
+            onChange={(e) => set("geminiModel", e.target.value)}
+            placeholder="gemini-3.6-flash"
+          />
+          <p className="text-xs text-slate-500 mt-1">
+            If Google retires this model, auto-read will start failing with an error naming the
+            model. Find the current model name at{" "}
+            <a
+              href="https://ai.google.dev/gemini-api/docs/models"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              ai.google.dev/gemini-api/docs/models
+            </a>{" "}
+            and paste it here — no code change or redeploy needed.
+          </p>
+        </div>
+      </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={saving}
+          className="rounded-md bg-brand text-white text-sm font-medium px-4 py-2 hover:bg-brand-dark disabled:opacity-60"
+        >
+          {saving ? "Saving…" : "Save settings"}
+        </button>
+        {savedAt && <span className="text-xs text-emerald-600">Saved.</span>}
+      </div>
+    </form>
+  );
+}
