@@ -37,9 +37,11 @@ export default async function CommissionInvoiceDetailPage({ params }: { params: 
             reimbursements: toNumber(invoice.reimbursements),
             totalAmount: toNumber(invoice.totalAmount),
             pdfPath: invoice.pdfPath,
+            poNumber: invoice.poNumber,
             collaborationBrand: invoice.collaborationBrand,
             partyName: invoice.client?.name || "—",
             partyId: invoice.clientId,
+            partyEmail: invoice.client?.email,
             lineItems: invoice.lineItems.map((li) => ({
               id: li.id,
               description: li.description,

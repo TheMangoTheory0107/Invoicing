@@ -39,13 +39,32 @@ export default function SettingsForm({ settings }: { settings: Settings }) {
     brandColor: settings.brandColor,
     geminiApiKey: settings.geminiApiKey,
     geminiModel: settings.geminiModel,
+    emailFromAddress: settings.emailFromAddress,
+    emailAppPassword: settings.emailAppPassword,
   });
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [emailTesting, setEmailTesting] = useState(false);
+  const [emailTestResult, setEmailTestResult] = useState<{ ok: true } | { ok: false; error: string } | null>(
+    null
+  );
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  async function onTestEmail() {
+    setEmailTesting(true);
+    setEmailTestResult(null);
+    const res = await fetch("/api/settings/email/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fromAddress: form.emailFromAddress, appPassword: form.emailAppPassword }),
+    });
+    const data = await res.json();
+    setEmailTesting(false);
+    setEmailTestResult(res.ok ? { ok: true } : { ok: false, error: data.error });
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -214,6 +233,54 @@ export default function SettingsForm({ settings }: { settings: Settings }) {
             </a>{" "}
             and paste it here — no code change or redeploy needed.
           </p>
+        </div>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-semibold text-slate-800 mb-3">Email invoices</h2>
+        <p className="text-xs text-slate-500 mb-3">
+          Lets you send an invoice straight from the app, from your own Gmail/Workspace address.
+          Turn on 2-Step Verification for that account, then create an{" "}
+          <a
+            href="https://myaccount.google.com/apppasswords"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            App Password
+          </a>{" "}
+          (choose app &quot;Mail&quot;) — paste that below, not your regular login password.
+        </p>
+        <div className="grid grid-cols-2 gap-4">
+          <Field
+            label="From address"
+            type="email"
+            value={form.emailFromAddress}
+            onChange={(e) => set("emailFromAddress", e.target.value)}
+            placeholder="business@themangotheory.co"
+          />
+          <Field
+            label="App password"
+            type="password"
+            value={form.emailAppPassword}
+            onChange={(e) => set("emailAppPassword", e.target.value)}
+            placeholder="16-character app password"
+          />
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onTestEmail}
+            disabled={emailTesting || !form.emailFromAddress || !form.emailAppPassword}
+            className="rounded-md border border-slate-300 text-sm font-medium px-4 py-2 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {emailTesting ? "Testing…" : "Test connection"}
+          </button>
+          {emailTestResult && (
+            <span className={`text-xs ${emailTestResult.ok ? "text-emerald-600" : "text-red-600"}`}>
+              {emailTestResult.ok ? "Connected — ready to send." : emailTestResult.error}
+            </span>
+          )}
         </div>
       </div>
 

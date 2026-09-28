@@ -114,8 +114,7 @@ export interface InvoicePdfData {
   type: "SALES" | "PURCHASE" | "COMMISSION";
   number: string;
   date: string;
-  billingDate1?: string | null;
-  billingDate2?: string | null;
+  poNumber?: string | null;
   collaborationBrand?: string | null;
   brandColor: string;
   logoPath?: string | null;
@@ -217,18 +216,13 @@ export default function InvoiceDocument({ data }: { data: InvoicePdfData }) {
             <Text style={styles.metaLabel}>Invoice No:</Text>
             <Text style={styles.metaValue}>{data.number}</Text>
             <Text style={styles.metaLabel}>Invoice date</Text>
-            <Text style={[styles.metaValue, (data.billingDate1 || data.billingDate2) ? {} : { marginBottom: 0 }]}>
+            <Text style={[styles.metaValue, data.poNumber ? {} : { marginBottom: 0 }]}>
               {formatDateDMY(new Date(data.date))}
             </Text>
-            {(data.billingDate1 || data.billingDate2) && (
+            {data.poNumber && (
               <>
-                <Text style={styles.metaLabel}>Billing Date</Text>
-                <Text style={[styles.metaValue, { marginBottom: 0 }]}>
-                  {[data.billingDate1, data.billingDate2]
-                    .filter(Boolean)
-                    .map((d) => formatDateDMY(new Date(d as string)))
-                    .join(", ")}
-                </Text>
+                <Text style={styles.metaLabel}>PO Number</Text>
+                <Text style={[styles.metaValue, { marginBottom: 0 }]}>{data.poNumber}</Text>
               </>
             )}
           </View>

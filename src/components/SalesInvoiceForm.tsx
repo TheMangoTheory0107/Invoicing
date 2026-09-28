@@ -48,8 +48,7 @@ export interface SalesInvoiceInitial {
   id?: string;
   clientId: string;
   date: string;
-  billingDate1: string;
-  billingDate2: string;
+  poNumber: string;
   dueDate: string;
   collaborationBrand: string;
   gstAmount: number;
@@ -93,8 +92,7 @@ export default function SalesInvoiceForm({
   const [creatingClient, setCreatingClient] = useState(false);
   const [newClientError, setNewClientError] = useState<string | null>(null);
   const [date, setDate] = useState(initial?.date || todayStr());
-  const [billingDate1, setBillingDate1] = useState(initial?.billingDate1 || "");
-  const [billingDate2, setBillingDate2] = useState(initial?.billingDate2 || "");
+  const [poNumber, setPoNumber] = useState(initial?.poNumber || "");
   const [dueDate, setDueDate] = useState(initial?.dueDate || "");
   const [collaborationBrand, setCollaborationBrand] = useState(initial?.collaborationBrand || "");
   const [gstAmount, setGstAmount] = useState(initial?.gstAmount ?? 0);
@@ -223,8 +221,7 @@ export default function SalesInvoiceForm({
     const payload = {
       clientId,
       date,
-      billingDate1: billingDate1 || null,
-      billingDate2: billingDate2 || null,
+      poNumber,
       dueDate: dueDate || null,
       collaborationBrand,
       creators: creators.filter((c) => c.name.trim()),
@@ -387,20 +384,13 @@ export default function SalesInvoiceForm({
             />
           </label>
           <label className="block">
-            <span className="block text-xs font-medium text-slate-600 mb-1">Billing date 1</span>
+            <span className="block text-xs font-medium text-slate-600 mb-1">
+              PO number <span className="text-slate-400">(client&apos;s purchase order, if any)</span>
+            </span>
             <input
-              type="date"
-              value={billingDate1}
-              onChange={(e) => setBillingDate1(e.target.value)}
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-          </label>
-          <label className="block">
-            <span className="block text-xs font-medium text-slate-600 mb-1">Billing date 2</span>
-            <input
-              type="date"
-              value={billingDate2}
-              onChange={(e) => setBillingDate2(e.target.value)}
+              value={poNumber}
+              onChange={(e) => setPoNumber(e.target.value)}
+              placeholder="e.g. PO-4521"
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
             />
           </label>

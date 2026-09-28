@@ -46,9 +46,8 @@ export const invoiceCreatorSchema = z.object({
 export const salesInvoiceSchema = z.object({
   clientId: z.string().min(1, "Client is required"),
   date: dateOnly,
-  billingDate1: dateOnly.optional().nullable(),
-  billingDate2: dateOnly.optional().nullable(),
   dueDate: dateOnly.optional().nullable(),
+  poNumber: z.string().optional().default(""),
   collaborationBrand: z.string().optional().default(""),
   creators: z.array(invoiceCreatorSchema).default([]),
   lineItems: z.array(lineItemSchema).min(1, "At least one line item is required"),

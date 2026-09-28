@@ -36,6 +36,10 @@ model Settings {
   // Which Gemini model to call — editable here so a model retirement/rename on Google's side
   // can be fixed from Settings, without needing a code change and redeploy.
   geminiModel          String  @default("gemini-3.6-flash")
+  // Gmail SMTP sending — a Google App Password (myaccount.google.com/apppasswords), not the
+  // account's real login password. Used to email invoices straight from the app.
+  emailFromAddress     String  @default("")
+  emailAppPassword     String  @default("")
 }
 
 // Auto-numbering counters, one row per (type, financial year).
@@ -81,8 +85,12 @@ model Invoice {
   number       String // e.g. "001/25-26"
   fy           String // "25-26"
   date         DateTime
+  // Never used in practice — kept only so already-applied migrations stay valid; the form no
+  // longer shows these. See `poNumber` for what replaced them.
   billingDate1 DateTime?
   billingDate2 DateTime?
+  // Client's own PO number for this invoice (Sales only) — free text, purely a reference field.
+  poNumber     String?
   month        String // "Aug" - month of `date`, for register + folder grouping
   dueDate      DateTime?
 

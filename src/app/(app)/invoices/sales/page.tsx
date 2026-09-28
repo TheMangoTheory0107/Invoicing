@@ -5,15 +5,21 @@ import PageHeader from "@/components/PageHeader";
 import StatusBadge from "@/components/StatusBadge";
 import ClickableRow from "@/components/ClickableRow";
 import StopClickPropagation from "@/components/StopClickPropagation";
+import SortControl from "@/components/SortControl";
 import { displayStatus } from "@/lib/status";
+import { invoiceOrderBy } from "@/lib/sortOrder";
 
 export const dynamic = "force-dynamic";
 
-export default async function SalesInvoicesPage() {
+export default async function SalesInvoicesPage({
+  searchParams,
+}: {
+  searchParams: { sort?: string };
+}) {
   const invoices = await prisma.invoice.findMany({
     where: { type: "SALES" },
     include: { client: true },
-    orderBy: { createdAt: "desc" },
+    orderBy: invoiceOrderBy(searchParams.sort),
   });
 
   return (
@@ -31,6 +37,9 @@ export default async function SalesInvoicesPage() {
         }
       />
       <div className="px-8 pb-12">
+        <div className="flex justify-end mb-3">
+          <SortControl />
+        </div>
         <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-slate-100 text-slate-500 text-xs uppercase">

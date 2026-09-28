@@ -24,6 +24,8 @@ const schema = z.object({
     .default("#134F5C"),
   geminiApiKey: z.string().default(""),
   geminiModel: z.string().min(1).default("gemini-3.6-flash"),
+  emailFromAddress: z.string().default(""),
+  emailAppPassword: z.string().default(""),
 });
 
 export async function PUT(req: NextRequest) {

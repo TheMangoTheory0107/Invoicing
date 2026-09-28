@@ -24,9 +24,11 @@ export interface InvoiceDetailData {
   pdfPath: string | null;
   hasSourcePdf?: boolean;
   vendorInvoiceNumber?: string | null;
+  poNumber?: string | null;
   collaborationBrand: string | null;
   partyName: string;
   partyId: string | null;
+  partyEmail?: string | null;
   lineItems: { id: string; description: string; link1: string | null; link2: string | null; qty: number; rate: number; amount: number }[];
   creators: { id: string; name: string; pageHandle: string | null; amount: number; partyId: string | null }[];
   payments: { id: string; date: string; amount: number; tdsAmount: number; method: string | null; reference: string | null }[];
@@ -46,6 +48,9 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generatingBills, setGeneratingBills] = useState(false);
+  const [emailTo, setEmailTo] = useState(data.partyEmail || "");
+  const [sendingEmail, setSendingEmail] = useState(false);
+  const [emailResult, setEmailResult] = useState<{ ok: true } | { ok: false; error: string } | null>(null);
 
   const listHref =
     data.type === "SALES"
@@ -110,6 +115,20 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
     if (res.ok) router.refresh();
   }
 
+  async function sendEmail(e: React.FormEvent) {
+    e.preventDefault();
+    setSendingEmail(true);
+    setEmailResult(null);
+    const res = await fetch(`/api/invoices/${data.id}/send-email`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to: emailTo }),
+    });
+    const resData = await res.json().catch(() => null);
+    setSendingEmail(false);
+    setEmailResult(res.ok ? { ok: true } : { ok: false, error: resData?.error || "Could not send the email." });
+  }
+
   const creatorsNeedingBills = data.creators.filter(
     (c) => c.partyId && c.amount > 0 && !data.hasLinkedPurchaseBillsFor.includes(c.partyId)
   );
@@ -159,6 +178,35 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
         </div>
       </div>
 
+      {data.type !== "PURCHASE" && (
+        <form
+          onSubmit={sendEmail}
+          className="bg-white border border-slate-200 rounded-lg px-4 py-3 flex flex-wrap items-center gap-2"
+        >
+          <span className="text-sm font-medium text-slate-700 shrink-0">Send by email</span>
+          <input
+            type="email"
+            required
+            value={emailTo}
+            onChange={(e) => setEmailTo(e.target.value)}
+            placeholder="client@example.com"
+            className="flex-1 min-w-[200px] rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          />
+          <button
+            type="submit"
+            disabled={sendingEmail}
+            className="rounded-md bg-brand text-white text-sm font-medium px-3 py-1.5 hover:bg-brand-dark disabled:opacity-60"
+          >
+            {sendingEmail ? "Sending…" : "Send"}
+          </button>
+          {emailResult && (
+            <span className={`text-xs ${emailResult.ok ? "text-emerald-600" : "text-red-600"} basis-full`}>
+              {emailResult.ok ? "Sent." : emailResult.error}
+            </span>
+          )}
+        </form>
+      )}
+
       {data.type === "SALES" && creatorsNeedingBills.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 flex items-center justify-between">
           <span className="text-sm text-amber-800">
@@ -177,6 +225,9 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
 
       {data.collaborationBrand && (
         <p className="text-sm text-slate-600">Collaboration brand: {data.collaborationBrand}</p>
+      )}
+      {data.poNumber && (
+        <p className="text-sm text-slate-600">PO number: {data.poNumber}</p>
       )}
 
       {data.creators.length > 0 && (

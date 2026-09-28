@@ -9,20 +9,21 @@ import ClickableRow from "@/components/ClickableRow";
 import StopClickPropagation from "@/components/StopClickPropagation";
 import { displayStatus } from "@/lib/status";
 import { buildInvoiceWhere } from "@/lib/registerQuery";
+import { invoiceOrderBy } from "@/lib/sortOrder";
 
 export const dynamic = "force-dynamic";
 
 export default async function SalesRegisterPage({
   searchParams,
 }: {
-  searchParams: { fy?: string; month?: string; status?: string; q?: string };
+  searchParams: { fy?: string; month?: string; status?: string; q?: string; sort?: string };
 }) {
   const [fyRows, invoices] = await Promise.all([
     prisma.invoice.findMany({ where: { type: "SALES" }, select: { fy: true }, distinct: ["fy"] }),
     prisma.invoice.findMany({
       where: buildInvoiceWhere("SALES", searchParams, "client"),
       include: { client: true },
-      orderBy: { date: "desc" },
+      orderBy: invoiceOrderBy(searchParams.sort),
     }),
   ]);
 
