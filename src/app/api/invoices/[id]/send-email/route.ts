@@ -12,8 +12,11 @@ export const dynamic = "force-dynamic";
 // Emails a Sales or Commission invoice — generates the same PDF Download would, attaches it,
 // and sends from the address configured in Settings. Purchase bills aren't sent this way; the
 // vendor already has their own copy, we're the recipient there, not the sender.
+// `subject` is optional — pass an existing thread's subject line to land the invoice in that
+// conversation (Gmail groups by subject match when sent from the same account), or leave it
+// out for the default auto-generated subject.
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const { to } = await req.json();
+  const { to, subject } = await req.json();
   if (!to || typeof to !== "string" || !to.includes("@")) {
     return NextResponse.json({ error: "Enter a valid email address to send to." }, { status: 400 });
   }
@@ -36,6 +39,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const pdfBuffer = await renderInvoicePdf(pdfData);
     const balance = toNumber(invoice.totalAmount) - toNumber(invoice.amountPaid) - toNumber(invoice.tdsDeducted);
     const invoiceLabel = invoice.type === "COMMISSION" ? "Commission invoice" : "Invoice";
+    const emailSubject =
+      typeof subject === "string" && subject.trim()
+        ? subject.trim()
+        : `${invoiceLabel} ${invoice.number} from ${settings.companyName}`;
 
     const html = buildInvoiceEmailHtml({
       companyName: settings.companyName,
@@ -54,7 +61,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       appPassword: settings.emailAppPassword,
       fromName: settings.companyName,
       to,
-      subject: `${invoiceLabel} ${invoice.number} from ${settings.companyName}`,
+      subject: emailSubject,
       html,
       attachment: { filename: `${invoice.number.replace(/\//g, "-")}.pdf`, content: pdfBuffer },
     });

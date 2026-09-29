@@ -49,6 +49,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
   const [error, setError] = useState<string | null>(null);
   const [generatingBills, setGeneratingBills] = useState(false);
   const [emailTo, setEmailTo] = useState(data.partyEmail || "");
+  const [emailSubject, setEmailSubject] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState<{ ok: true } | { ok: false; error: string } | null>(null);
 
@@ -122,7 +123,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
     const res = await fetch(`/api/invoices/${data.id}/send-email`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to: emailTo }),
+      body: JSON.stringify({ to: emailTo, subject: emailSubject || undefined }),
     });
     const resData = await res.json().catch(() => null);
     setSendingEmail(false);
@@ -190,7 +191,15 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
             value={emailTo}
             onChange={(e) => setEmailTo(e.target.value)}
             placeholder="client@example.com"
-            className="flex-1 min-w-[200px] rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+            className="flex-1 min-w-[160px] rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          />
+          <input
+            type="text"
+            value={emailSubject}
+            onChange={(e) => setEmailSubject(e.target.value)}
+            placeholder={`Subject (optional — default: Invoice ${data.number})`}
+            title="Leave blank for the default subject. To land this in an existing email thread, type that thread's exact subject line here."
+            className="flex-1 min-w-[220px] rounded-md border border-slate-300 px-3 py-1.5 text-sm"
           />
           <button
             type="submit"
