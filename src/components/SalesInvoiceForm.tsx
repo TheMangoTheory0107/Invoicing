@@ -105,6 +105,9 @@ export default function SalesInvoiceForm({
   const [creators, setCreators] = useState<CreatorRow[]>(initial?.creators || []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [emailOnSave, setEmailOnSave] = useState(false);
+  const [emailOnSaveTo, setEmailOnSaveTo] = useState("");
+  const [emailOnSaveSubject, setEmailOnSaveSubject] = useState("");
 
   const billAmount = useMemo(() => lineItems.reduce((s, li) => s + (li.amount || 0), 0), [lineItems]);
   const totalAmount = billAmount + (gstAmount || 0) + (reimbursements || 0);
@@ -136,6 +139,15 @@ export default function SalesInvoiceForm({
     if (!q) return clientList;
     return clientList.filter((c) => c.name.toLowerCase().includes(q));
   }, [clientList, clientQuery]);
+
+  // Pre-fills the "email after saving" address from whichever client is selected, same as
+  // the detail page's Send by email box does — but never overwrites it once the user has
+  // typed their own address in.
+  const emailToManuallySet = useRef(false);
+  useEffect(() => {
+    if (emailToManuallySet.current || isEdit) return;
+    setEmailOnSaveTo(clientList.find((c) => c.id === clientId)?.email || "");
+  }, [clientId, clientList, isEdit]);
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -245,6 +257,21 @@ export default function SalesInvoiceForm({
       return;
     }
     warnOnSyncFailure(data.syncResult, data.driveSyncResult);
+
+    if (!isEdit && emailOnSave && emailOnSaveTo.trim()) {
+      const emailRes = await fetch(`/api/invoices/${data.invoice.id}/send-email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: emailOnSaveTo.trim(), subject: emailOnSaveSubject.trim() || undefined }),
+      });
+      if (!emailRes.ok) {
+        const emailData = await emailRes.json().catch(() => null);
+        alert(
+          `The invoice saved, but the email didn't send: ${emailData?.error || "unknown error"}\n\nYou can retry from the invoice's detail page.`
+        );
+      }
+    }
+
     router.push(`${basePath}/${data.invoice.id}`);
     router.refresh();
   }
@@ -396,6 +423,48 @@ export default function SalesInvoiceForm({
           </label>
         </div>
       </section>
+
+      {!isEdit && (
+        <section className="bg-white border border-slate-200 rounded-lg p-6">
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-800 mb-1">
+            <input
+              type="checkbox"
+              checked={emailOnSave}
+              onChange={(e) => setEmailOnSave(e.target.checked)}
+            />
+            Email this invoice once it&apos;s saved
+          </label>
+          {emailOnSave && (
+            <div className="grid grid-cols-2 gap-4 mt-3">
+              <label className="block">
+                <span className="block text-xs font-medium text-slate-600 mb-1">Send to</span>
+                <input
+                  type="email"
+                  required={emailOnSave}
+                  value={emailOnSaveTo}
+                  onChange={(e) => {
+                    emailToManuallySet.current = true;
+                    setEmailOnSaveTo(e.target.value);
+                  }}
+                  placeholder="client@example.com"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-xs font-medium text-slate-600 mb-1">
+                  Subject <span className="text-slate-400">(optional — blank uses the default)</span>
+                </span>
+                <input
+                  value={emailOnSaveSubject}
+                  onChange={(e) => setEmailOnSaveSubject(e.target.value)}
+                  placeholder="Leave blank, or match an existing thread's subject"
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+                />
+              </label>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="bg-white border border-slate-200 rounded-lg p-6">
         <div className="flex items-center justify-between mb-4">
