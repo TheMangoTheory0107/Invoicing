@@ -51,7 +51,9 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
   const [emailTo, setEmailTo] = useState(data.partyEmail || "");
   const [emailSubject, setEmailSubject] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
-  const [emailResult, setEmailResult] = useState<{ ok: true } | { ok: false; error: string } | null>(null);
+  const [emailResult, setEmailResult] = useState<
+    { ok: true; threaded: boolean; warning?: string } | { ok: false; error: string } | null
+  >(null);
 
   const listHref =
     data.type === "SALES"
@@ -127,7 +129,11 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
     });
     const resData = await res.json().catch(() => null);
     setSendingEmail(false);
-    setEmailResult(res.ok ? { ok: true } : { ok: false, error: resData?.error || "Could not send the email." });
+    setEmailResult(
+      res.ok
+        ? { ok: true, threaded: !!resData?.threaded, warning: resData?.warning }
+        : { ok: false, error: resData?.error || "Could not send the email." }
+    );
   }
 
   const creatorsNeedingBills = data.creators.filter(
@@ -209,8 +215,14 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
             {sendingEmail ? "Sending…" : "Send"}
           </button>
           {emailResult && (
-            <span className={`text-xs ${emailResult.ok ? "text-emerald-600" : "text-red-600"} basis-full`}>
-              {emailResult.ok ? "Sent." : emailResult.error}
+            <span
+              className={`text-xs ${emailResult.ok ? (emailResult.warning ? "text-amber-600" : "text-emerald-600") : "text-red-600"} basis-full`}
+            >
+              {emailResult.ok
+                ? emailResult.threaded
+                  ? "Sent — landed in the existing email thread."
+                  : emailResult.warning || "Sent."
+                : emailResult.error}
             </span>
           )}
         </form>

@@ -49,6 +49,10 @@ export default function SettingsForm({ settings }: { settings: Settings }) {
   const [emailTestResult, setEmailTestResult] = useState<{ ok: true } | { ok: false; error: string } | null>(
     null
   );
+  const [threadTesting, setThreadTesting] = useState(false);
+  const [threadTestResult, setThreadTestResult] = useState<{ ok: true } | { ok: false; error: string } | null>(
+    null
+  );
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -65,6 +69,19 @@ export default function SettingsForm({ settings }: { settings: Settings }) {
     const data = await res.json();
     setEmailTesting(false);
     setEmailTestResult(res.ok ? { ok: true } : { ok: false, error: data.error });
+  }
+
+  async function onTestThreadAccess() {
+    setThreadTesting(true);
+    setThreadTestResult(null);
+    const res = await fetch("/api/settings/email/test-thread", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fromAddress: form.emailFromAddress }),
+    });
+    const data = await res.json();
+    setThreadTesting(false);
+    setThreadTestResult(res.ok ? { ok: true } : { ok: false, error: data.error });
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -281,6 +298,70 @@ export default function SettingsForm({ settings }: { settings: Settings }) {
               {emailTestResult.ok ? "Connected — ready to send." : emailTestResult.error}
             </span>
           )}
+        </div>
+
+        <div className="mt-5 pt-4 border-t border-slate-100">
+          <h3 className="text-xs font-semibold text-slate-700 mb-1">
+            Landing in an existing email thread <span className="text-slate-400 font-normal">(optional)</span>
+          </h3>
+          <p className="text-xs text-slate-500 mb-3">
+            When you type a Subject while sending an invoice, the app can search{" "}
+            {form.emailFromAddress || "your mailbox"} for the most recent thread with that exact subject and
+            reply into it directly — real threading, not just a guess. This reuses the same service account
+            JSON already pasted above under Google Sheets &amp; Drive sync, extended with Gmail access:
+          </p>
+          <ol className="text-xs text-slate-500 list-decimal list-inside space-y-1 mb-3">
+            <li>
+              In{" "}
+              <a
+                href="https://console.cloud.google.com/apis/library/gmail.googleapis.com"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Google Cloud Console
+              </a>
+              , enable the <strong>Gmail API</strong> on the same project as your service account.
+            </li>
+            <li>
+              Open the service account JSON you pasted above and copy its <code>client_id</code> field (a long
+              number).
+            </li>
+            <li>
+              In your{" "}
+              <a
+                href="https://admin.google.com/ac/owl/domainwidedelegation"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Workspace Admin Console → Security → API controls → Domain-wide delegation
+              </a>
+              , add that client ID with these two OAuth scopes:
+              <code className="block bg-slate-50 rounded px-2 py-1 mt-1 break-all">
+                https://www.googleapis.com/auth/gmail.readonly, https://www.googleapis.com/auth/gmail.send
+              </code>
+            </li>
+          </ol>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onTestThreadAccess}
+              disabled={threadTesting || !form.emailFromAddress}
+              className="rounded-md border border-slate-300 text-sm font-medium px-4 py-2 hover:bg-slate-50 disabled:opacity-60"
+            >
+              {threadTesting ? "Testing…" : "Test thread search access"}
+            </button>
+            {threadTestResult && (
+              <span className={`text-xs ${threadTestResult.ok ? "text-emerald-600" : "text-red-600"}`}>
+                {threadTestResult.ok ? "Access confirmed — thread-matching is ready." : threadTestResult.error}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-400 mt-2">
+            Not set up yet, or this test fails? No problem — leaving Subject blank (or if the search fails)
+            always falls back to a normal new email via the App Password above.
+          </p>
         </div>
       </div>
 

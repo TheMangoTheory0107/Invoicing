@@ -4,6 +4,7 @@ import { getSettings } from "@/lib/settings";
 import { buildInvoicePdfData } from "@/lib/invoiceService";
 import { renderInvoicePdf } from "@/lib/pdf/generate";
 import { sendInvoiceEmail, EmailSendError } from "@/lib/email";
+import { sendInThreadOrFresh, GmailThreadError } from "@/lib/gmailThread";
 import { buildInvoiceEmailHtml } from "@/lib/emailTemplate";
 import { toNumber } from "@/lib/format";
 
@@ -12,9 +13,14 @@ export const dynamic = "force-dynamic";
 // Emails a Sales or Commission invoice — generates the same PDF Download would, attaches it,
 // and sends from the address configured in Settings. Purchase bills aren't sent this way; the
 // vendor already has their own copy, we're the recipient there, not the sender.
-// `subject` is optional — pass an existing thread's subject line to land the invoice in that
-// conversation (Gmail groups by subject match when sent from the same account), or leave it
-// out for the default auto-generated subject.
+//
+// `subject` is optional. Left blank, it sends a normal new email via Gmail SMTP (App Password).
+// Filled in, it instead searches the mailbox (via the Sheets/Drive service account, once a
+// Workspace admin has granted it Gmail domain-wide delegation) for the most recent thread with
+// that exact subject, and replies into it with real threading headers — not a new email Gmail
+// merely groups by guesswork. If that search/send fails for any reason (delegation not granted
+// yet, no matching thread, etc.), it automatically falls back to a plain new email instead of
+// blocking the send, and says so in the response.
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const { to, subject } = await req.json();
   if (!to || typeof to !== "string" || !to.includes("@")) {
@@ -27,9 +33,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   const settings = await getSettings();
-  if (!settings.emailFromAddress || !settings.emailAppPassword) {
+  if (!settings.emailFromAddress) {
     return NextResponse.json(
-      { error: "No sending email configured — add one in Settings → Email invoices first." },
+      { error: "No sending email address configured — add one in Settings → Email invoices first." },
       { status: 400 }
     );
   }
@@ -43,6 +49,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       typeof subject === "string" && subject.trim()
         ? subject.trim()
         : `${invoiceLabel} ${invoice.number} from ${settings.companyName}`;
+    const wantsThreadMatch = typeof subject === "string" && subject.trim().length > 0;
 
     const html = buildInvoiceEmailHtml({
       companyName: settings.companyName,
@@ -56,17 +63,60 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       balance,
     });
 
-    await sendInvoiceEmail({
-      fromAddress: settings.emailFromAddress,
-      appPassword: settings.emailAppPassword,
-      fromName: settings.companyName,
-      to,
-      subject: emailSubject,
-      html,
-      attachment: { filename: `${invoice.number.replace(/\//g, "-")}.pdf`, content: pdfBuffer },
-    });
+    const attachment = { filename: `${invoice.number.replace(/\//g, "-")}.pdf`, content: pdfBuffer };
 
-    return NextResponse.json({ ok: true });
+    let threaded = false;
+    let fallbackReason: string | undefined;
+
+    if (wantsThreadMatch) {
+      const driveConfig = await prisma.sheetSyncConfig.findUnique({ where: { id: 1 } });
+      if (!driveConfig?.serviceAccountJson) {
+        fallbackReason =
+          "No service account configured — set one up in Settings → Google Sheets & Drive sync first, then grant it Gmail access.";
+      } else {
+        try {
+          const result = await sendInThreadOrFresh({
+            serviceAccountJson: driveConfig.serviceAccountJson,
+            impersonate: settings.emailFromAddress,
+            fromName: settings.companyName,
+            to,
+            subject: emailSubject,
+            html,
+            attachment,
+          });
+          threaded = result.threaded;
+          if (!threaded) fallbackReason = "No existing email thread matched that subject — sent as a new email instead.";
+        } catch (err) {
+          fallbackReason = err instanceof GmailThreadError ? err.message : "Could not search the mailbox for a matching thread.";
+        }
+      }
+    }
+
+    // Either thread-matching wasn't requested, or it was and failed — either way, a plain
+    // email still needs to go out via the App Password path, same as before this feature.
+    if (!wantsThreadMatch || !threaded) {
+      if (!settings.emailAppPassword) {
+        return NextResponse.json(
+          {
+            error: fallbackReason
+              ? `${fallbackReason} And no App Password is set in Settings to fall back to.`
+              : "No App Password configured — add one in Settings → Email invoices first.",
+          },
+          { status: 400 }
+        );
+      }
+      await sendInvoiceEmail({
+        fromAddress: settings.emailFromAddress,
+        appPassword: settings.emailAppPassword,
+        fromName: settings.companyName,
+        to,
+        subject: emailSubject,
+        html,
+        attachment,
+      });
+    }
+
+    return NextResponse.json({ ok: true, threaded, warning: wantsThreadMatch ? fallbackReason : undefined });
   } catch (err) {
     const message = err instanceof EmailSendError ? err.message : "Could not send the email.";
     return NextResponse.json({ error: message }, { status: 400 });
