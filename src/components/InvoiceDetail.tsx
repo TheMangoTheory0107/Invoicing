@@ -52,7 +52,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
   const [emailSubject, setEmailSubject] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState<
-    { ok: true; threaded: boolean; warning?: string } | { ok: false; error: string } | null
+    { ok: true; threaded: boolean; to?: string; warning?: string } | { ok: false; error: string } | null
   >(null);
 
   const listHref =
@@ -120,18 +120,22 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
 
   async function sendEmail(e: React.FormEvent) {
     e.preventDefault();
+    if (!emailTo.trim() && !emailSubject.trim()) {
+      setEmailResult({ ok: false, error: "Enter an email address, a subject, or both." });
+      return;
+    }
     setSendingEmail(true);
     setEmailResult(null);
     const res = await fetch(`/api/invoices/${data.id}/send-email`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to: emailTo, subject: emailSubject || undefined }),
+      body: JSON.stringify({ to: emailTo || undefined, subject: emailSubject || undefined }),
     });
     const resData = await res.json().catch(() => null);
     setSendingEmail(false);
     setEmailResult(
       res.ok
-        ? { ok: true, threaded: !!resData?.threaded, warning: resData?.warning }
+        ? { ok: true, threaded: !!resData?.threaded, to: resData?.to, warning: resData?.warning }
         : { ok: false, error: resData?.error || "Could not send the email." }
     );
   }
@@ -193,18 +197,18 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
           <span className="text-sm font-medium text-slate-700 shrink-0">Send by email</span>
           <input
             type="email"
-            required
             value={emailTo}
             onChange={(e) => setEmailTo(e.target.value)}
-            placeholder="client@example.com"
+            placeholder="client@example.com (optional if Subject matches a thread)"
+            title="Only needed when there's no matching thread to reply into — with a Subject that matches one, this is ignored."
             className="flex-1 min-w-[160px] rounded-md border border-slate-300 px-3 py-1.5 text-sm"
           />
           <input
             type="text"
             value={emailSubject}
             onChange={(e) => setEmailSubject(e.target.value)}
-            placeholder={`Subject (optional — default: Invoice ${data.number})`}
-            title="Leave blank for the default subject. To land this in an existing email thread, type that thread's exact subject line here."
+            placeholder="Subject (optional — match an existing thread instead of the email above)"
+            title="Leave blank to just send to the email address. Fill in an existing thread's exact subject to reply into it directly — the address above won't be needed."
             className="flex-1 min-w-[220px] rounded-md border border-slate-300 px-3 py-1.5 text-sm"
           />
           <button
@@ -220,8 +224,10 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
             >
               {emailResult.ok
                 ? emailResult.threaded
-                  ? "Sent — landed in the existing email thread."
-                  : emailResult.warning || "Sent."
+                  ? `Sent — landed in the existing email thread${emailResult.to ? ` with ${emailResult.to}` : ""}.`
+                  : emailResult.warning
+                    ? `${emailResult.warning}${emailResult.to ? ` (to ${emailResult.to})` : ""}`
+                    : `Sent${emailResult.to ? ` to ${emailResult.to}` : ""}.`
                 : emailResult.error}
             </span>
           )}

@@ -228,6 +228,10 @@ export default function SalesInvoiceForm({
       setError("Every line item needs a description.");
       return;
     }
+    if (emailOnSave && !emailOnSaveTo.trim() && !emailOnSaveSubject.trim()) {
+      setError("Enter an email address, a subject, or both, or uncheck \"Email this invoice once it's saved\".");
+      return;
+    }
     setSaving(true);
 
     const payload = {
@@ -258,11 +262,11 @@ export default function SalesInvoiceForm({
     }
     warnOnSyncFailure(data.syncResult, data.driveSyncResult);
 
-    if (!isEdit && emailOnSave && emailOnSaveTo.trim()) {
+    if (!isEdit && emailOnSave && (emailOnSaveTo.trim() || emailOnSaveSubject.trim())) {
       const emailRes = await fetch(`/api/invoices/${data.invoice.id}/send-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: emailOnSaveTo.trim(), subject: emailOnSaveSubject.trim() || undefined }),
+        body: JSON.stringify({ to: emailOnSaveTo.trim() || undefined, subject: emailOnSaveSubject.trim() || undefined }),
       });
       if (!emailRes.ok) {
         const emailData = await emailRes.json().catch(() => null);
@@ -437,10 +441,11 @@ export default function SalesInvoiceForm({
           {emailOnSave && (
             <div className="grid grid-cols-2 gap-4 mt-3">
               <label className="block">
-                <span className="block text-xs font-medium text-slate-600 mb-1">Send to</span>
+                <span className="block text-xs font-medium text-slate-600 mb-1">
+                  Send to <span className="text-slate-400">(not needed if Subject matches a thread)</span>
+                </span>
                 <input
                   type="email"
-                  required={emailOnSave}
                   value={emailOnSaveTo}
                   onChange={(e) => {
                     emailToManuallySet.current = true;
@@ -452,12 +457,12 @@ export default function SalesInvoiceForm({
               </label>
               <label className="block">
                 <span className="block text-xs font-medium text-slate-600 mb-1">
-                  Subject <span className="text-slate-400">(optional — blank uses the default)</span>
+                  Subject <span className="text-slate-400">(optional — match a thread instead of the address above)</span>
                 </span>
                 <input
                   value={emailOnSaveSubject}
                   onChange={(e) => setEmailOnSaveSubject(e.target.value)}
-                  placeholder="Leave blank, or match an existing thread's subject"
+                  placeholder="Leave blank, or an existing thread's exact subject"
                   className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
                 />
               </label>
