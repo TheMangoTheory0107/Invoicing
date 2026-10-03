@@ -114,10 +114,16 @@ export default function SalesInvoiceForm({
 
   // GST auto-calculates as 18% of the bill amount whenever line items change — but if
   // someone has manually typed a different GST figure (e.g. a zero-rated invoice), we stop
-  // overwriting it. Editing an existing invoice starts "manual" so its saved amount isn't
-  // silently recalculated just from opening the page.
-  const gstManuallySet = useRef(!!initial);
+  // overwriting it. The very first render is skipped so opening an existing invoice never
+  // immediately overwrites its saved GST just from loading the page — but editing line items
+  // afterward (even on an existing invoice) still recalculates it, same as on a new one.
+  const gstManuallySet = useRef(false);
+  const gstSkipFirstRun = useRef(!!initial);
   useEffect(() => {
+    if (gstSkipFirstRun.current) {
+      gstSkipFirstRun.current = false;
+      return;
+    }
     if (gstManuallySet.current) return;
     setGstAmount(Math.round(billAmount * GST_RATE * 100) / 100);
   }, [billAmount]);
