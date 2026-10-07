@@ -22,7 +22,7 @@ export default async function SalesRegisterPage({
     prisma.invoice.findMany({ where: { type: "SALES" }, select: { fy: true }, distinct: ["fy"] }),
     prisma.invoice.findMany({
       where: buildInvoiceWhere("SALES", searchParams, "client"),
-      include: { client: true, creators: { orderBy: { sortOrder: "asc" } } },
+      include: { client: true },
       orderBy: invoiceOrderBy(searchParams.sort),
     }),
   ]);
@@ -53,7 +53,7 @@ export default async function SalesRegisterPage({
                 <th className="text-left px-3 py-2">Month</th>
                 <th className="text-left px-3 py-2">Date</th>
                 <th className="text-left px-3 py-2">Agency</th>
-                <th className="text-left px-3 py-2">Creators</th>
+                <th className="text-left px-3 py-2">Service</th>
                 <th className="text-left px-3 py-2">GST No.</th>
                 <th className="text-left px-3 py-2">Bill No</th>
                 <th className="text-right px-3 py-2">Bill Amount</th>
@@ -70,9 +70,7 @@ export default async function SalesRegisterPage({
                   <td className="px-3 py-2">{inv.month}</td>
                   <td className="px-3 py-2">{formatDateDMY(inv.date)}</td>
                   <td className="px-3 py-2">{inv.client?.name || "—"}</td>
-                  <td className="px-3 py-2 text-slate-500">
-                    {inv.creators.length > 0 ? inv.creators.map((c) => c.name).join(", ") : "—"}
-                  </td>
+                  <td className="px-3 py-2 text-slate-500">Influencer Marketing Services</td>
                   <td className="px-3 py-2 text-slate-500">{inv.client?.gstin || "—"}</td>
                   <td className="px-3 py-2">
                     <Link href={`/invoices/sales/${inv.id}`} className="text-brand hover:underline font-medium">
