@@ -6,6 +6,7 @@ import type { Party } from "@prisma/client";
 import { formatINR } from "@/lib/format";
 import { warnOnSyncFailure } from "@/lib/syncWarning";
 import { detectPurchaseBillFileKind, PURCHASE_BILL_ACCEPT } from "@/lib/purchaseBillFileType";
+import type { ExtractedPurchaseBill } from "@/lib/geminiExtract";
 
 interface LineItemRow {
   description: string;
@@ -114,11 +115,19 @@ export default function PurchaseInvoiceForm({
 
     const formData = new FormData();
     formData.append("file", file);
-    const res = await fetch("/api/invoices/purchase/extract", { method: "POST", body: formData });
-    const data = await res.json();
+    let res: Response;
+    let data: { error?: string } | { extracted: ExtractedPurchaseBill; matchedCreatorId: string | null; possibleDuplicate: { id: string; number: string; vendorInvoiceNumber: string | null } | null };
+    try {
+      res = await fetch("/api/invoices/purchase/extract", { method: "POST", body: formData });
+      data = await res.json();
+    } catch {
+      setExtracting(false);
+      setExtractError("Could not read that file — the request timed out or failed. Try again.");
+      return;
+    }
     setExtracting(false);
-    if (!res.ok) {
-      setExtractError(data.error || "Could not read that file.");
+    if (!res.ok || !("extracted" in data)) {
+      setExtractError(("error" in data && data.error) || "Could not read that file.");
       return;
     }
 

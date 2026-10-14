@@ -5,6 +5,11 @@ import { extractPurchaseBill, GeminiExtractError } from "@/lib/geminiExtract";
 import { detectPurchaseBillFileKind } from "@/lib/purchaseBillFileType";
 import { xlsxBufferToText, csvBufferToText } from "@/lib/purchaseBillTextExtract";
 
+// Gemini can take a while on a PDF, especially on a newly-released model under heavy load —
+// give it more room than Vercel's short default function timeout so a slow-but-successful
+// call doesn't get cut off mid-request.
+export const maxDuration = 60;
+
 // Reads an uploaded Purchase bill (PDF, Excel, or CSV) via Gemini, then tries to match the extracted vendor
 // name against an existing Creator party (case-insensitive exact match first, then a loose
 // contains-match either direction) so the form can pre-select them instead of leaving it blank.
