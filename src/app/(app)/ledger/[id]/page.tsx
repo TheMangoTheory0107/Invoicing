@@ -3,20 +3,44 @@ import { notFound } from "next/navigation";
 import { formatINR } from "@/lib/format";
 import { formatDateDMY } from "@/lib/fy";
 import PageHeader from "@/components/PageHeader";
+import LedgerEntryFilters from "@/components/LedgerEntryFilters";
 import { fetchPartyLedger } from "@/lib/ledger";
 
 export const dynamic = "force-dynamic";
 
 const INVOICE_PATH: Record<string, string> = { SALES: "sales", PURCHASE: "purchase", COMMISSION: "commission" };
+const MONTH_OPTIONS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-export default async function PartyLedgerPage({ params }: { params: { id: string } }) {
-  const { party, rows, totals, outstanding } = await fetchPartyLedger(params.id).catch(() => {
+export default async function PartyLedgerPage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams: { fy?: string; month?: string; status?: string; kind?: string; q?: string; sort?: string };
+}) {
+  const { party, rows: allRows, totals, outstanding } = await fetchPartyLedger(params.id).catch(() => {
     notFound();
   });
 
   const isClient = party.type === "CLIENT";
   const outstandingLabel = isClient ? "Receivable" : "Payable";
   const editHref = isClient ? `/parties/clients/${party.id}` : `/parties/creators/${party.id}`;
+
+  // The totals/outstanding cards above stay lifetime figures regardless of filtering — only
+  // which rows are listed below changes. Each row's balance was already computed against the
+  // party's full chronological history, so filtering never recalculates it.
+  const fyOptions = Array.from(new Set(allRows.map((r) => r.fy))).sort().reverse();
+  let rows = allRows;
+  if (searchParams.fy) rows = rows.filter((r) => r.fy === searchParams.fy);
+  if (searchParams.month) rows = rows.filter((r) => r.month === searchParams.month);
+  if (searchParams.kind) rows = rows.filter((r) => r.kind === searchParams.kind);
+  if (searchParams.status === "OVERDUE") rows = rows.filter((r) => r.invoiceStatus === "OVERDUE");
+  else if (searchParams.status) rows = rows.filter((r) => r.invoiceStatus === searchParams.status);
+  if (searchParams.q) {
+    const q = searchParams.q.toLowerCase();
+    rows = rows.filter((r) => r.invoiceNumber.toLowerCase().includes(q));
+  }
+  if (searchParams.sort === "newest") rows = [...rows].reverse();
 
   return (
     <div>
@@ -42,6 +66,12 @@ export default async function PartyLedgerPage({ params }: { params: { id: string
         </div>
       </div>
       <div className="px-8 pb-12">
+        <LedgerEntryFilters fyOptions={fyOptions} monthOptions={MONTH_OPTIONS} />
+        {rows.length !== allRows.length && (
+          <p className="text-xs text-slate-400 mb-2">
+            Showing {rows.length} of {allRows.length} entries.
+          </p>
+        )}
         <div className="bg-white border border-slate-200 rounded-lg overflow-x-auto">
           <table className="w-full text-sm whitespace-nowrap">
             <thead className="bg-slate-100 text-slate-500 text-xs uppercase">
@@ -76,7 +106,7 @@ export default async function PartyLedgerPage({ params }: { params: { id: string
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                    No invoices yet.
+                    {allRows.length === 0 ? "No invoices yet." : "No entries match these filters."}
                   </td>
                 </tr>
               )}

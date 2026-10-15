@@ -1,26 +1,47 @@
 import Link from "next/link";
 import { formatINR } from "@/lib/format";
 import PageHeader from "@/components/PageHeader";
+import LedgerIndexFilters from "@/components/LedgerIndexFilters";
 import { fetchAllPartyBalances } from "@/lib/ledger";
 
 export const dynamic = "force-dynamic";
 
-export default async function LedgerIndexPage() {
+export default async function LedgerIndexPage({
+  searchParams,
+}: {
+  searchParams: { q?: string; sort?: string };
+}) {
   const balances = await fetchAllPartyBalances();
-  const clients = balances.filter((b) => b.type === "CLIENT");
-  const creators = balances.filter((b) => b.type === "CREATOR");
 
-  const receivable = clients.reduce((s, c) => s + Math.max(0, c.outstanding), 0);
-  const payable = creators.reduce((s, c) => s + Math.max(0, c.outstanding), 0);
+  // The two summary cards above always reflect everyone — only the lists below narrow down.
+  const receivableAll = balances.filter((b) => b.type === "CLIENT").reduce((s, c) => s + Math.max(0, c.outstanding), 0);
+  const payableAll = balances.filter((b) => b.type === "CREATOR").reduce((s, c) => s + Math.max(0, c.outstanding), 0);
+
+  let filtered = balances;
+  if (searchParams.q) {
+    const q = searchParams.q.toLowerCase();
+    filtered = filtered.filter((b) => b.name.toLowerCase().includes(q));
+  }
+  filtered = [...filtered].sort((a, b) => {
+    if (searchParams.sort === "name") return a.name.localeCompare(b.name);
+    if (searchParams.sort === "outstanding-asc") return a.outstanding - b.outstanding;
+    return b.outstanding - a.outstanding;
+  });
+
+  const clients = filtered.filter((b) => b.type === "CLIENT");
+  const creators = filtered.filter((b) => b.type === "CREATOR");
 
   return (
     <div>
       <PageHeader title="Ledgers" subtitle="Debtors and creditors — outstanding balance per party" />
       <div className="px-8">
         <div className="grid grid-cols-2 gap-4 mb-6">
-          <SummaryCard label="Total receivable (clients owe you)" value={formatINR(receivable)} tone="emerald" />
-          <SummaryCard label="Total payable (you owe creators)" value={formatINR(payable)} tone="amber" />
+          <SummaryCard label="Total receivable (clients owe you)" value={formatINR(receivableAll)} tone="emerald" />
+          <SummaryCard label="Total payable (you owe creators)" value={formatINR(payableAll)} tone="amber" />
         </div>
+      </div>
+      <div className="px-8">
+        <LedgerIndexFilters />
       </div>
       <div className="px-8 pb-12 grid grid-cols-2 gap-6">
         <LedgerTable title="Clients / Agencies" rows={clients} basePath="/ledger" />

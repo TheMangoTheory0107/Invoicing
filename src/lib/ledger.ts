@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/format";
+import { displayStatus } from "@/lib/status";
 
 export interface LedgerEntry {
   date: Date;
@@ -8,6 +9,9 @@ export interface LedgerEntry {
   invoiceId: string;
   invoiceNumber: string;
   invoiceType: "SALES" | "PURCHASE" | "COMMISSION";
+  fy: string;
+  month: string;
+  invoiceStatus: string; // the parent invoice's status — carried onto its payment rows too, so filtering by status hides a fully-settled invoice's history together
   debit: number;
   credit: number;
   tdsAmount: number;
@@ -36,6 +40,12 @@ export async function fetchPartyLedger(partyId: string) {
   const raw: Omit<LedgerEntry, "balance">[] = [];
   for (const inv of invoices) {
     const invoiceType = inv.type as "SALES" | "PURCHASE" | "COMMISSION";
+    const invoiceStatus = displayStatus(
+      inv.status,
+      inv.dueDate,
+      toNumber(inv.amountPaid) + toNumber(inv.tdsDeducted),
+      toNumber(inv.totalAmount)
+    );
     raw.push({
       date: inv.date,
       kind: "INVOICE",
@@ -43,6 +53,9 @@ export async function fetchPartyLedger(partyId: string) {
       invoiceId: inv.id,
       invoiceNumber: inv.number,
       invoiceType,
+      fy: inv.fy,
+      month: inv.month,
+      invoiceStatus,
       debit: toNumber(inv.totalAmount),
       credit: 0,
       tdsAmount: 0,
@@ -55,6 +68,9 @@ export async function fetchPartyLedger(partyId: string) {
         invoiceId: inv.id,
         invoiceNumber: inv.number,
         invoiceType,
+        fy: inv.fy,
+        month: inv.month,
+        invoiceStatus,
         debit: 0,
         credit: toNumber(p.amount) + toNumber(p.tdsAmount),
         tdsAmount: toNumber(p.tdsAmount),
