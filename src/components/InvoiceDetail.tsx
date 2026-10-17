@@ -148,6 +148,13 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
     <div className="space-y-6 pb-16">
       <div className="flex items-center gap-3">
         <StatusBadge status={effectiveStatus} />
+        {balance > 0.01 && (
+          <span className="text-sm font-medium text-amber-700">
+            {settled > 0.01
+              ? `${formatINR(balance)} still due — ${formatINR(settled)} received so far`
+              : `${formatINR(balance)} due`}
+          </span>
+        )}
         <span className="text-sm text-slate-500">
           {data.partyName} · {data.date.slice(0, 10)}
           {data.dueDate ? ` · due ${data.dueDate.slice(0, 10)}` : ""}
