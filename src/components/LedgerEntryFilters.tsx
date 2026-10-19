@@ -3,15 +3,9 @@
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 
 const STATUS_OPTIONS = ["", "UNPAID", "PARTIAL", "PAID", "OVERDUE"];
-const KIND_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "All entries" },
-  { value: "INVOICE", label: "Invoices only" },
-  { value: "PAYMENT", label: "Payments only" },
-];
 
-// Cuts down a long party ledger (every invoice + every payment, in one flat list) to just
-// what's being asked about right now — mirrors the Register pages' filter bar so the whole
-// app filters the same way.
+// Cuts down a long party ledger (one row per invoice) to just what's being asked about right
+// now — mirrors the Register pages' filter bar so the whole app filters the same way.
 export default function LedgerEntryFilters({
   fyOptions,
   monthOptions,
@@ -53,17 +47,6 @@ export default function LedgerEntryFilters({
         {monthOptions.map((m) => (
           <option key={m} value={m}>
             {m}
-          </option>
-        ))}
-      </select>
-      <select
-        value={params.get("kind") || ""}
-        onChange={(e) => set("kind", e.target.value)}
-        className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-      >
-        {KIND_OPTIONS.map((k) => (
-          <option key={k.value} value={k.value}>
-            {k.label}
           </option>
         ))}
       </select>

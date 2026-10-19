@@ -2,88 +2,63 @@ import { prisma } from "@/lib/prisma";
 import { toNumber } from "@/lib/format";
 import { displayStatus } from "@/lib/status";
 
-export interface LedgerEntry {
-  date: Date;
-  kind: "INVOICE" | "PAYMENT";
-  label: string;
+// One row per invoice — not a running bank-statement balance. "Balance" is always that
+// invoice's own invoiced amount minus what's actually been settled against it, so it reads the
+// same way the invoice detail page does: this invoice, this much owed. Multiple payments
+// against one invoice are summed into a single "Settled" figure rather than listed as separate
+// rows — the full payment-by-payment breakdown is one click away on the invoice itself.
+export interface PartyInvoiceRow {
   invoiceId: string;
   invoiceNumber: string;
   invoiceType: "SALES" | "PURCHASE" | "COMMISSION";
+  date: Date;
   fy: string;
   month: string;
-  invoiceStatus: string; // the parent invoice's status — carried onto its payment rows too, so filtering by status hides a fully-settled invoice's history together
-  debit: number;
-  credit: number;
+  status: string;
+  invoiced: number;
+  settled: number;
   tdsAmount: number;
   balance: number;
+  paymentCount: number;
 }
 
-const TYPE_LABEL: Record<string, string> = {
+export const TYPE_LABEL: Record<string, string> = {
   SALES: "Sales invoice",
   COMMISSION: "Commission invoice",
   PURCHASE: "Purchase bill",
 };
 
-// A single party's full statement — every invoice raised/received and every payment against
-// it, in date order, with a running balance. For a CLIENT the balance is a receivable (what
-// they owe us); for a CREATOR it's a payable (what we owe them) — same arithmetic either way,
-// only the label differs.
+// A single party's full statement, one row per invoice. For a CLIENT the outstanding total is
+// a receivable (what they owe us); for a CREATOR it's a payable (what we owe them) — same
+// arithmetic either way, only the label differs.
 export async function fetchPartyLedger(partyId: string) {
   const party = await prisma.party.findUniqueOrThrow({ where: { id: partyId } });
 
   const invoices = await prisma.invoice.findMany({
     where: party.type === "CLIENT" ? { clientId: partyId } : { creatorId: partyId },
-    include: { payments: { orderBy: { date: "asc" } } },
+    include: { payments: true },
     orderBy: { date: "asc" },
   });
 
-  const raw: Omit<LedgerEntry, "balance">[] = [];
-  for (const inv of invoices) {
+  const rows: PartyInvoiceRow[] = invoices.map((inv) => {
     const invoiceType = inv.type as "SALES" | "PURCHASE" | "COMMISSION";
-    const invoiceStatus = displayStatus(
-      inv.status,
-      inv.dueDate,
-      toNumber(inv.amountPaid) + toNumber(inv.tdsDeducted),
-      toNumber(inv.totalAmount)
-    );
-    raw.push({
-      date: inv.date,
-      kind: "INVOICE",
-      label: `${TYPE_LABEL[inv.type] || inv.type} ${inv.number}`,
+    const invoiced = toNumber(inv.totalAmount);
+    const settled = toNumber(inv.amountPaid) + toNumber(inv.tdsDeducted);
+    const status = displayStatus(inv.status, inv.dueDate, settled, invoiced);
+    return {
       invoiceId: inv.id,
       invoiceNumber: inv.number,
       invoiceType,
+      date: inv.date,
       fy: inv.fy,
       month: inv.month,
-      invoiceStatus,
-      debit: toNumber(inv.totalAmount),
-      credit: 0,
-      tdsAmount: 0,
-    });
-    for (const p of inv.payments) {
-      raw.push({
-        date: p.date,
-        kind: "PAYMENT",
-        label: `Payment — ${inv.number}${p.method ? ` (${p.method})` : ""}`,
-        invoiceId: inv.id,
-        invoiceNumber: inv.number,
-        invoiceType,
-        fy: inv.fy,
-        month: inv.month,
-        invoiceStatus,
-        debit: 0,
-        credit: toNumber(p.amount) + toNumber(p.tdsAmount),
-        tdsAmount: toNumber(p.tdsAmount),
-      });
-    }
-  }
-
-  raw.sort((a, b) => a.date.getTime() - b.date.getTime());
-
-  let running = 0;
-  const rows: LedgerEntry[] = raw.map((e) => {
-    running += e.debit - e.credit;
-    return { ...e, balance: running };
+      status,
+      invoiced,
+      settled,
+      tdsAmount: toNumber(inv.tdsDeducted),
+      balance: invoiced - settled,
+      paymentCount: inv.payments.length,
+    };
   });
 
   const totals = invoices.reduce(
