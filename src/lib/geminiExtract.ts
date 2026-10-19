@@ -70,6 +70,31 @@ export type PurchaseBillSource =
   | { kind: "pdf"; buffer: Buffer }
   | { kind: "text"; content: string };
 
+// 429 (rate limited) and 503 ("high demand") are both transient on Google's end — worth a
+// couple of automatic retries before bothering the user, instead of making them manually swap
+// the model in Settings every time Gemini has a brief overload spike.
+const RETRYABLE_STATUSES = [429, 503];
+const RETRY_DELAYS_MS = [1500, 4000];
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callGeminiWithRetry(url: string, body: string): Promise<Response> {
+  let res: Response;
+  for (let attempt = 0; ; attempt++) {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (res.ok || !RETRYABLE_STATUSES.includes(res.status) || attempt >= RETRY_DELAYS_MS.length) {
+      return res;
+    }
+    await sleep(RETRY_DELAYS_MS[attempt]);
+  }
+}
+
 export async function extractPurchaseBill(
   source: PurchaseBillSource,
   apiKey: string,
@@ -91,26 +116,23 @@ export async function extractPurchaseBill(
           },
         ];
 
-  const res = await fetch(
+  const res = await callGeminiWithRetry(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: SCHEMA,
-        },
-      }),
-    }
+    JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: SCHEMA,
+      },
+    })
   );
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new GeminiExtractError(
-      `Gemini API request failed (${res.status}). Check the API key in Settings is valid. ${body.slice(0, 300)}`
-    );
+    const retriedNote = RETRYABLE_STATUSES.includes(res.status)
+      ? " Already retried a few times — Gemini is under sustained heavy load right now, try again shortly."
+      : " Check the API key and model name in Settings are valid.";
+    throw new GeminiExtractError(`Gemini API request failed (${res.status}).${retriedNote} ${body.slice(0, 300)}`);
   }
 
   const data = await res.json();
