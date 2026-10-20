@@ -70,28 +70,51 @@ export type PurchaseBillSource =
   | { kind: "pdf"; buffer: Buffer }
   | { kind: "text"; content: string };
 
-// 429 (rate limited) and 503 ("high demand") are both transient on Google's end — worth a
-// couple of automatic retries before bothering the user, instead of making them manually swap
-// the model in Settings every time Gemini has a brief overload spike.
+// 429 (rate limited) and 503 ("high demand") are both transient on Google's end, worth one
+// automatic retry instead of making the user manually swap the model in Settings. But under
+// sustained load Gemini can be *slow* to fail (not just quick-failing), so more than one retry
+// risks multiplying a long wait into a much longer one — each attempt gets a hard timeout, and
+// there's only a single retry, so the worst case stays bounded well under the request's own
+// function timeout.
 const RETRYABLE_STATUSES = [429, 503];
-const RETRY_DELAYS_MS = [1500, 4000];
+const MAX_RETRIES = 1;
+const RETRY_DELAY_MS = 2000;
+const PER_ATTEMPT_TIMEOUT_MS = 25000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function callGeminiWithRetry(url: string, body: string): Promise<Response> {
-  let res: Response;
-  for (let attempt = 0; ; attempt++) {
-    res = await fetch(url, {
+async function callGeminiOnce(url: string, body: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PER_ATTEMPT_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
+      signal: controller.signal,
     });
-    if (res.ok || !RETRYABLE_STATUSES.includes(res.status) || attempt >= RETRY_DELAYS_MS.length) {
-      return res;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function callGeminiWithRetry(url: string, body: string): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await callGeminiOnce(url, body);
+      if (res.ok || !RETRYABLE_STATUSES.includes(res.status) || attempt >= MAX_RETRIES) {
+        return res;
+      }
+    } catch {
+      if (attempt >= MAX_RETRIES) {
+        throw new GeminiExtractError(
+          `Gemini took too long to respond (over ${PER_ATTEMPT_TIMEOUT_MS / 1000}s) — it's likely under heavy load right now. Try again shortly.`
+        );
+      }
     }
-    await sleep(RETRY_DELAYS_MS[attempt]);
+    await sleep(RETRY_DELAY_MS);
   }
 }
 
@@ -130,7 +153,7 @@ export async function extractPurchaseBill(
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     const retriedNote = RETRYABLE_STATUSES.includes(res.status)
-      ? " Already retried a few times — Gemini is under sustained heavy load right now, try again shortly."
+      ? " Already retried once — Gemini is under sustained heavy load right now, try again shortly."
       : " Check the API key and model name in Settings are valid.";
     throw new GeminiExtractError(`Gemini API request failed (${res.status}).${retriedNote} ${body.slice(0, 300)}`);
   }
