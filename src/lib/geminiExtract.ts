@@ -70,19 +70,19 @@ export type PurchaseBillSource =
   | { kind: "pdf"; buffer: Buffer }
   | { kind: "text"; content: string };
 
-// 429 (rate limited) and 503 ("high demand") are both transient on Google's end, worth one
-// automatic retry instead of making the user manually swap the model in Settings. But under
-// sustained load Gemini can be *slow* to fail (not just quick-failing), so more than one retry
-// risks multiplying a long wait into a much longer one — each attempt gets a hard timeout, and
-// there's only a single retry, so the worst case stays bounded well under the request's own
-// function timeout.
-const RETRYABLE_STATUSES = [429, 503];
-const MAX_RETRIES = 1;
-const RETRY_DELAY_MS = 2000;
-const PER_ATTEMPT_TIMEOUT_MS = 25000;
+// Google has repeatedly retired model IDs out from under this app (gemini-2.5-flash, then
+// gemini-2.0-flash both went from "works" to 404 "no longer available" with no warning), and
+// even the current one spikes into 503 "high demand" for stretches at a time on the free tier.
+// Retrying the SAME model just waits out the same problem twice. Instead, a 404/429/503 moves
+// on to the next model in this chain — a different model is a different capacity pool and
+// (for 404) simply a different, still-valid model ID — so one bad/overloaded model no longer
+// means a dead end. Update this list if Google deprecates one of these too.
+const FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash"];
+const MODEL_FALLBACK_STATUSES = [404, 429, 503];
+const PER_ATTEMPT_TIMEOUT_MS = 18000;
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function buildModelChain(configured: string): string[] {
+  return Array.from(new Set([configured, ...FALLBACK_MODELS]));
 }
 
 async function callGeminiOnce(url: string, body: string): Promise<Response> {
@@ -100,22 +100,28 @@ async function callGeminiOnce(url: string, body: string): Promise<Response> {
   }
 }
 
-async function callGeminiWithRetry(url: string, body: string): Promise<Response> {
-  for (let attempt = 0; ; attempt++) {
+async function callGeminiAcrossModels(
+  apiKey: string,
+  models: string[],
+  body: string
+): Promise<{ res: Response; modelUsed: string }> {
+  let last: { res: Response; modelUsed: string } | null = null;
+  for (const model of models) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
     try {
       const res = await callGeminiOnce(url, body);
-      if (res.ok || !RETRYABLE_STATUSES.includes(res.status) || attempt >= MAX_RETRIES) {
-        return res;
+      if (res.ok || !MODEL_FALLBACK_STATUSES.includes(res.status)) {
+        return { res, modelUsed: model };
       }
+      last = { res, modelUsed: model };
     } catch {
-      if (attempt >= MAX_RETRIES) {
-        throw new GeminiExtractError(
-          `Gemini took too long to respond (over ${PER_ATTEMPT_TIMEOUT_MS / 1000}s) — it's likely under heavy load right now. Try again shortly.`
-        );
-      }
+      // Timed out — treat the same as a fallback-worthy failure and move to the next model.
     }
-    await sleep(RETRY_DELAY_MS);
   }
+  if (last) return last;
+  throw new GeminiExtractError(
+    `Gemini timed out on every model tried (${models.join(", ")}) — likely a sustained outage. Try again shortly.`
+  );
 }
 
 export async function extractPurchaseBill(
@@ -139,8 +145,10 @@ export async function extractPurchaseBill(
           },
         ];
 
-  const res = await callGeminiWithRetry(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+  const models = buildModelChain(model);
+  const { res, modelUsed } = await callGeminiAcrossModels(
+    apiKey,
+    models,
     JSON.stringify({
       contents: [{ parts }],
       generationConfig: {
@@ -152,10 +160,10 @@ export async function extractPurchaseBill(
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    const retriedNote = RETRYABLE_STATUSES.includes(res.status)
-      ? " Already retried once — Gemini is under sustained heavy load right now, try again shortly."
-      : " Check the API key and model name in Settings are valid.";
-    throw new GeminiExtractError(`Gemini API request failed (${res.status}).${retriedNote} ${body.slice(0, 300)}`);
+    const triedNote = MODEL_FALLBACK_STATUSES.includes(res.status)
+      ? ` Tried ${models.length > 1 ? `${models.length} models (${models.join(", ")})` : modelUsed} — all unavailable right now, try again shortly.`
+      : " Check the API key in Settings is valid.";
+    throw new GeminiExtractError(`Gemini API request failed (${res.status}) on ${modelUsed}.${triedNote} ${body.slice(0, 300)}`);
   }
 
   const data = await res.json();
