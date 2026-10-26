@@ -75,6 +75,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     let threaded = false;
     let resolvedTo = trimmedTo || undefined;
+    let resolvedCc: string | undefined;
     let sentViaGmailApi = false;
     let note: string | undefined;
 
@@ -95,6 +96,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           });
           threaded = result.threaded;
           resolvedTo = result.to;
+          resolvedCc = result.cc;
           sentViaGmailApi = true;
           if (!threaded) note = "No existing email thread matched that subject — sent as a new email instead.";
         } catch (err) {
@@ -131,7 +133,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       resolvedTo = fallbackTo;
     }
 
-    return NextResponse.json({ ok: true, threaded, to: resolvedTo, warning: note });
+    return NextResponse.json({ ok: true, threaded, to: resolvedTo, cc: resolvedCc, warning: note });
   } catch (err) {
     const message = err instanceof EmailSendError ? err.message : "Could not send the email.";
     return NextResponse.json({ error: message }, { status: 400 });

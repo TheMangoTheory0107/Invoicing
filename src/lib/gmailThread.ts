@@ -45,38 +45,71 @@ async function findMostRecentThreadId(gmail: GmailClient, subject: string): Prom
 async function getLastMessageThreadingHeaders(
   gmail: GmailClient,
   threadId: string
-): Promise<{ messageId?: string; references?: string; from?: string; to?: string }> {
+): Promise<{ messageId?: string; references?: string; from?: string; to?: string; cc?: string }> {
   const res = await gmail.users.threads.get({
     userId: "me",
     id: threadId,
     format: "metadata",
-    metadataHeaders: ["Message-ID", "References", "From", "To"],
+    metadataHeaders: ["Message-ID", "References", "From", "To", "Cc"],
   });
   const messages = res.data.messages || [];
   const last = messages[messages.length - 1];
   const headers = last?.payload?.headers || [];
   const find = (name: string) => headers.find((h) => h.name === name)?.value || undefined;
-  return { messageId: find("Message-ID"), references: find("References"), from: find("From"), to: find("To") };
+  return {
+    messageId: find("Message-ID"),
+    references: find("References"),
+    from: find("From"),
+    to: find("To"),
+    cc: find("Cc"),
+  };
 }
 
-// Headers look like `"Sarah Khan" <sarah@agency.com>` or just `sarah@agency.com` — pull out
-// just the address.
-function extractEmailAddress(headerValue: string): string | null {
-  const match = headerValue.match(/<([^>]+)>/);
-  const address = (match ? match[1] : headerValue).trim();
-  return address.includes("@") ? address : null;
+// A header value is comma-separated addresses, each either `"Sarah Khan" <sarah@agency.com>`
+// or a bare `sarah@agency.com`. Pulls out every address, not just the first.
+function extractAllEmailAddresses(headerValue: string): string[] {
+  const bracketed = Array.from(headerValue.matchAll(/<([^>]+)>/g))
+    .map((m) => m[1].trim())
+    .filter((a) => a.includes("@"));
+  if (bracketed.length > 0) return bracketed;
+  return headerValue
+    .split(",")
+    .map((part) => part.trim())
+    .filter((a) => a.includes("@"));
 }
 
-// Whoever's on the other end of the last message: if we sent it ourselves, that's whoever we
-// sent it TO; if they sent it, that's whoever it's FROM. Either way, no address needs typing in.
-function resolveCounterpartAddress(
-  headers: { from?: string; to?: string },
+// Reply-All: everyone who was on the last message (its From, To and Cc) stays on the reply,
+// minus our own mailbox. If they sent the last message, it goes To them with everyone else
+// Cc'd; if we sent it ourselves (e.g. still waiting on a reply), there's no distinct "sender"
+// to single out, so the whole original audience goes in To.
+function resolveReplyAllRecipients(
+  headers: { from?: string; to?: string; cc?: string },
   impersonate: string
-): string | null {
-  const fromAddress = headers.from ? extractEmailAddress(headers.from) : null;
-  const sentByUs = fromAddress?.toLowerCase() === impersonate.toLowerCase();
-  const candidate = sentByUs ? headers.to : headers.from;
-  return candidate ? extractEmailAddress(candidate) : null;
+): { to: string[]; cc: string[] } {
+  const isSelf = (a: string) => a.toLowerCase() === impersonate.toLowerCase();
+  const fromAddrs = headers.from ? extractAllEmailAddresses(headers.from) : [];
+  const toAddrs = headers.to ? extractAllEmailAddresses(headers.to) : [];
+  const ccAddrs = headers.cc ? extractAllEmailAddresses(headers.cc) : [];
+
+  const sentByUs = fromAddrs.some(isSelf);
+  const dedupe = (addrs: string[]) => {
+    const seen = new Set<string>();
+    return addrs.filter((a) => {
+      const key = a.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+
+  if (sentByUs) {
+    const to = dedupe([...toAddrs, ...ccAddrs].filter((a) => !isSelf(a)));
+    return { to, cc: [] };
+  }
+
+  const to = dedupe(fromAddrs.filter((a) => !isSelf(a)));
+  const cc = dedupe([...toAddrs, ...ccAddrs].filter((a) => !isSelf(a) && !to.some((t) => t.toLowerCase() === a.toLowerCase())));
+  return { to, cc };
 }
 
 
@@ -105,7 +138,8 @@ export interface ThreadedSendParams {
 
 export interface ThreadedSendResult {
   threaded: boolean; // true if a matching thread was found and replied into
-  to: string; // the address actually used — either resolved from the thread, or the fallback
+  to: string; // the primary recipient(s), comma-separated — either resolved from the thread, or the fallback
+  cc?: string; // everyone else who was on the original thread (comma-separated), if any
 }
 
 // A lightweight connectivity check for Settings — confirms the service account can actually
@@ -124,17 +158,18 @@ export async function testGmailAccess(serviceAccountJson: string, impersonate: s
 }
 
 // Searches the impersonated mailbox for the most recent thread with a matching subject and
-// sends the invoice as a genuine reply inside it (correct threading headers + Gmail's
-// threadId), addressed to whoever's actually on the other end of that thread. `params.to` is
-// only a fallback, used when no thread matches — never blocks on "no thread found" as long as
-// a fallback address is given.
+// sends the invoice as a genuine Reply-All inside it (correct threading headers + Gmail's
+// threadId) — everyone who was on that last message (sender, To, and Cc) stays on this one,
+// our own mailbox excluded. `params.to` is only a fallback, used when no thread matches —
+// never blocks on "no thread found" as long as a fallback address is given.
 export async function sendInThreadOrFresh(params: ThreadedSendParams): Promise<ThreadedSendResult> {
   const gmail = getGmailClient(params.serviceAccountJson, params.impersonate);
 
   let threadId: string | null = null;
   let inReplyTo: string | undefined;
   let references: string | undefined;
-  let resolvedTo: string | null = null;
+  let resolvedTo: string[] = [];
+  let resolvedCc: string[] = [];
 
   try {
     threadId = await findMostRecentThreadId(gmail, params.subject);
@@ -142,7 +177,9 @@ export async function sendInThreadOrFresh(params: ThreadedSendParams): Promise<T
       const headers = await getLastMessageThreadingHeaders(gmail, threadId);
       inReplyTo = headers.messageId;
       references = [headers.references, headers.messageId].filter(Boolean).join(" ") || undefined;
-      resolvedTo = resolveCounterpartAddress(headers, params.impersonate);
+      const recipients = resolveReplyAllRecipients(headers, params.impersonate);
+      resolvedTo = recipients.to;
+      resolvedCc = recipients.cc;
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -151,14 +188,16 @@ export async function sendInThreadOrFresh(params: ThreadedSendParams): Promise<T
     );
   }
 
-  const to = resolvedTo || params.to;
-  if (!to) {
+  const to = resolvedTo.length > 0 ? resolvedTo : params.to ? [params.to] : [];
+  if (to.length === 0) {
     throw new GmailThreadError(
       threadId
         ? "Found a matching thread, but couldn't tell who it was with — add an email address to send to."
         : "No matching thread found, and no email address was given to fall back to."
     );
   }
+  // The fallback-to-a-typed-address path has no thread to pull a Cc list from.
+  const cc = resolvedTo.length > 0 ? resolvedCc : [];
 
   const mailOptions: Record<string, unknown> = {
     from: `"${params.fromName}" <${params.impersonate}>`,
@@ -167,6 +206,7 @@ export async function sendInThreadOrFresh(params: ThreadedSendParams): Promise<T
     html: params.html,
     attachments: [{ filename: params.attachment.filename, content: params.attachment.content }],
   };
+  if (cc.length > 0) mailOptions.cc = cc;
   if (inReplyTo) mailOptions.inReplyTo = inReplyTo;
   if (references) mailOptions.references = references;
 
@@ -182,5 +222,5 @@ export async function sendInThreadOrFresh(params: ThreadedSendParams): Promise<T
     throw new GmailThreadError(`Could not send via the Gmail API. (${message})`);
   }
 
-  return { threaded: !!threadId, to };
+  return { threaded: !!threadId, to: to.join(", "), cc: cc.length > 0 ? cc.join(", ") : undefined };
 }

@@ -52,7 +52,9 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
   const [emailSubject, setEmailSubject] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailResult, setEmailResult] = useState<
-    { ok: true; threaded: boolean; to?: string; warning?: string } | { ok: false; error: string } | null
+    | { ok: true; threaded: boolean; to?: string; cc?: string; warning?: string }
+    | { ok: false; error: string }
+    | null
   >(null);
 
   const listHref =
@@ -135,7 +137,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
     setSendingEmail(false);
     setEmailResult(
       res.ok
-        ? { ok: true, threaded: !!resData?.threaded, to: resData?.to, warning: resData?.warning }
+        ? { ok: true, threaded: !!resData?.threaded, to: resData?.to, cc: resData?.cc, warning: resData?.warning }
         : { ok: false, error: resData?.error || "Could not send the email." }
     );
   }
@@ -231,7 +233,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
             >
               {emailResult.ok
                 ? emailResult.threaded
-                  ? `Sent — landed in the existing email thread${emailResult.to ? ` with ${emailResult.to}` : ""}.`
+                  ? `Sent — landed in the existing email thread with ${emailResult.to}${emailResult.cc ? ` (cc: ${emailResult.cc})` : ""}.`
                   : emailResult.warning
                     ? `${emailResult.warning}${emailResult.to ? ` (to ${emailResult.to})` : ""}`
                     : `Sent${emailResult.to ? ` to ${emailResult.to}` : ""}.`
