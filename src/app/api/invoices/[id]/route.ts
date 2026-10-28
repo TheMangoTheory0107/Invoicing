@@ -35,11 +35,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       if (!parsed.success) {
         return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
       }
-      const { invoice, syncResult, driveSyncResult } =
+      const { invoice, syncResult, driveSyncResult, linkSyncResult } =
         existing.type === "COMMISSION"
           ? await updateCommissionInvoice(params.id, parsed.data)
           : await updateSalesInvoice(params.id, parsed.data);
-      return NextResponse.json({ invoice, syncResult, driveSyncResult });
+      return NextResponse.json({ invoice, syncResult, driveSyncResult, linkSyncResult });
     } else {
       const parsed = purchaseInvoiceSchema.safeParse(body);
       if (!parsed.success) {

@@ -23,6 +23,12 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     { ok: true; name: string; email: string } | { ok: false; error: string } | null
   >(null);
   const [driveTesting, setDriveTesting] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<
+    | { ok: true; matched: number; invoicesMatched: number; invoicesChecked: number; invoicesWithLinks: number }
+    | { ok: false; error: string }
+    | null
+  >(null);
 
   function set<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -78,6 +84,22 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     } else {
       setDriveTestResult({ ok: false, error: data.error });
     }
+  }
+
+  async function onBackfill() {
+    if (
+      !confirm(
+        "This scans every monthly tab (Oct'25, Nov'26, etc.) for Link matches against every existing Sales/Commission invoice, and writes Bill No + that line item's amount wherever it finds one. Matching cells get highlighted yellow. Safe to re-run, but it does write to the live sheet now — continue?"
+      )
+    ) {
+      return;
+    }
+    setBackfilling(true);
+    setBackfillResult(null);
+    const res = await fetch("/api/settings/sheets/backfill-links", { method: "POST" });
+    const data = await res.json();
+    setBackfilling(false);
+    setBackfillResult(res.ok ? { ok: true, ...data } : { ok: false, error: data.error || "Could not run the backfill." });
   }
 
   return (
@@ -238,6 +260,47 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
           )}
         </div>
       )}
+
+      <div className="border-t border-slate-100 pt-4">
+        <h3 className="text-sm font-semibold text-slate-800">Monthly sheet Bill No sync</h3>
+        <p className="text-xs text-slate-500 mt-1">
+          Every Sales/Commission invoice you save now also scans your monthly tracking tabs
+          (Oct&apos;25, Nov&apos;26, …) for rows whose <strong>Link</strong> matches one of the
+          invoice&apos;s line items, and writes that invoice&apos;s number — plus that line
+          item&apos;s own amount, not the invoice total — into the row&apos;s{" "}
+          <strong>Bill No</strong> column, highlighted yellow. A tab missing a Link or Bill No
+          column is skipped automatically (your team reshuffles those column sets most months).
+        </p>
+        <div className="flex items-center gap-3 mt-3">
+          <button
+            type="button"
+            onClick={onBackfill}
+            disabled={backfilling || !form.spreadsheetId || !form.serviceAccountJson}
+            className="rounded-md border border-slate-300 text-sm font-medium px-4 py-2 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {backfilling ? "Running…" : "Backfill already-raised invoices"}
+          </button>
+          <span className="text-xs text-slate-400">
+            One-time catch-up for invoices created before this was added. Safe to re-run.
+          </span>
+        </div>
+        {backfillResult && (
+          <div
+            className={`rounded-md px-3 py-2 text-sm mt-2 ${
+              backfillResult.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+            }`}
+          >
+            {backfillResult.ok ? (
+              <>
+                Checked {backfillResult.invoicesChecked} invoices ({backfillResult.invoicesWithLinks} had links).
+                Matched {backfillResult.invoicesMatched} invoice(s), writing {backfillResult.matched} cell(s).
+              </>
+            ) : (
+              backfillResult.error
+            )}
+          </div>
+        )}
+      </div>
     </form>
   );
 }

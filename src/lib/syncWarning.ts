@@ -9,7 +9,8 @@ interface SyncResultLike {
 // it's actually visible instead of just "nothing happened."
 export function warnOnSyncFailure(
   syncResult?: SyncResultLike | null,
-  driveSyncResult?: SyncResultLike | null
+  driveSyncResult?: SyncResultLike | null,
+  linkSyncResult?: SyncResultLike | null
 ) {
   const failures: string[] = [];
   if (syncResult?.attempted && !syncResult.ok) {
@@ -17,6 +18,9 @@ export function warnOnSyncFailure(
   }
   if (driveSyncResult?.attempted && !driveSyncResult.ok) {
     failures.push(`Google Drive upload failed: ${driveSyncResult.error || "unknown error"}`);
+  }
+  if (linkSyncResult?.attempted && !linkSyncResult.ok) {
+    failures.push(`Monthly sheet Bill No sync failed: ${linkSyncResult.error || "unknown error"}`);
   }
   if (failures.length > 0) {
     alert(

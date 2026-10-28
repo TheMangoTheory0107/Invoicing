@@ -5,6 +5,7 @@ import { financialYearFor, monthLabel, parseDateOnly, addDays } from "@/lib/fy";
 import type { InvoicePdfData } from "@/lib/pdf/InvoiceDocument";
 import { syncInvoiceToSheet, deleteInvoiceFromSheet } from "@/lib/sheetSync";
 import { syncInvoiceToDrive, deleteInvoiceDriveFile } from "@/lib/driveSync";
+import { syncLineItemLinksToMonthlySheets, type LinkSyncResult } from "@/lib/googleSheets";
 import { renderInvoicePdf } from "@/lib/pdf/generate";
 import { toNumber } from "@/lib/format";
 import type { SalesInvoiceInput, PurchaseInvoiceInput } from "@/lib/validation";
@@ -131,12 +132,32 @@ function buildPdfDataFromInvoice(
 async function finalize(invoiceId: string) {
   const invoice = await prisma.invoice.findUniqueOrThrow({
     where: { id: invoiceId },
-    include: { client: true, creator: true, payments: true },
+    include: { client: true, creator: true, payments: true, lineItems: true },
   });
 
   const syncResult = await syncInvoiceToSheet(invoice);
 
   const driveConfig = await prisma.sheetSyncConfig.findUnique({ where: { id: 1 } });
+
+  // Sales/Commission line items carry the creator content links the monthly tracking sheets
+  // key off of — Purchase bills don't have this concept, so they're skipped entirely.
+  let linkSyncResult: LinkSyncResult = { attempted: false, ok: true, matched: 0 };
+  if (invoice.type !== "PURCHASE" && driveConfig?.spreadsheetId && driveConfig.serviceAccountJson) {
+    const byLink = new Map<string, number>();
+    for (const li of invoice.lineItems) {
+      const amount = toNumber(li.amount);
+      if (li.link1?.trim()) byLink.set(li.link1.trim(), amount);
+      if (li.link2?.trim()) byLink.set(li.link2.trim(), amount);
+    }
+    if (byLink.size > 0) {
+      linkSyncResult = await syncLineItemLinksToMonthlySheets({
+        serviceAccountJson: driveConfig.serviceAccountJson,
+        spreadsheetId: driveConfig.spreadsheetId,
+        invoiceNumber: invoice.number,
+        links: Array.from(byLink, ([link, amount]) => ({ link, amount })),
+      });
+    }
+  }
   let driveSyncResult = { attempted: false, ok: true } as Awaited<ReturnType<typeof syncInvoiceToDrive>>;
   // A Purchase bill that came from an uploaded vendor PDF skips this entirely: the original
   // file (uploaded separately via the extraction flow) is the record worth keeping in Drive,
@@ -169,7 +190,7 @@ async function finalize(invoiceId: string) {
     }
   }
 
-  return { invoice, syncResult, driveSyncResult };
+  return { invoice, syncResult, driveSyncResult, linkSyncResult };
 }
 
 // Shared by Sales and Commission invoices — both are client-billed, same shape, same GST

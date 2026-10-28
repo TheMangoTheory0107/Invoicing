@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const { invoice, syncResult, driveSyncResult } = await createCommissionInvoice(parsed.data);
-    return NextResponse.json({ invoice, syncResult, driveSyncResult }, { status: 201 });
+    const { invoice, syncResult, driveSyncResult, linkSyncResult } = await createCommissionInvoice(parsed.data);
+    return NextResponse.json({ invoice, syncResult, driveSyncResult, linkSyncResult }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Could not create invoice.";
     return NextResponse.json({ error: message }, { status: 500 });

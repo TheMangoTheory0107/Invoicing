@@ -266,7 +266,7 @@ export default function SalesInvoiceForm({
       setError(typeof data.error === "string" ? data.error : "Could not save invoice.");
       return;
     }
-    warnOnSyncFailure(data.syncResult, data.driveSyncResult);
+    warnOnSyncFailure(data.syncResult, data.driveSyncResult, data.linkSyncResult);
 
     if (!isEdit && emailOnSave && (emailOnSaveTo.trim() || emailOnSaveSubject.trim())) {
       const emailRes = await fetch(`/api/invoices/${data.invoice.id}/send-email`, {
