@@ -25,7 +25,7 @@ export function buildReconciliationWhere(filters: ReconciliationFilters): Prisma
   }
 
   if (filters.status === "OVERDUE") {
-    where.status = { not: "PAID" };
+    where.status = { notIn: ["PAID", "CANCELLED"] };
     where.dueDate = { lt: startOfTodayUTC() };
   } else if (filters.status) {
     where.status = filters.status;

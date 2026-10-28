@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 
-const STATUS_OPTIONS = ["", "UNPAID", "PARTIAL", "PAID", "OVERDUE"];
+const STATUS_OPTIONS = ["", "UNPAID", "PARTIAL", "PAID", "OVERDUE", "CANCELLED"];
 
 // Cuts down a long party ledger (one row per invoice) to just what's being asked about right
 // now — mirrors the Register pages' filter bar so the whole app filters the same way.

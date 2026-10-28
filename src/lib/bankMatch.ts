@@ -25,7 +25,7 @@ export interface MatchCandidate {
 export async function findCandidateMatches(tx: BankTransaction): Promise<MatchCandidate[]> {
   const types = tx.direction === "CREDIT" ? ["SALES", "COMMISSION"] : ["PURCHASE"];
   const invoices = await prisma.invoice.findMany({
-    where: { type: { in: types }, status: { not: "PAID" } },
+    where: { type: { in: types }, status: { notIn: ["PAID", "CANCELLED"] } },
     include: { client: true, creator: true },
     orderBy: { date: "desc" },
     take: 500,

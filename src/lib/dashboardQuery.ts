@@ -21,9 +21,18 @@ export async function fetchBusinessOverview(filters: DashboardFilters) {
   const periodWhere = buildPeriodWhere(filters);
 
   const [sales, commission, purchase] = await Promise.all([
-    prisma.invoice.findMany({ where: { ...periodWhere, type: "SALES" }, select: { billAmount: true } }),
-    prisma.invoice.findMany({ where: { ...periodWhere, type: "COMMISSION" }, select: { billAmount: true } }),
-    prisma.invoice.findMany({ where: { ...periodWhere, type: "PURCHASE" }, select: { billAmount: true } }),
+    prisma.invoice.findMany({
+      where: { ...periodWhere, type: "SALES", status: { not: "CANCELLED" } },
+      select: { billAmount: true },
+    }),
+    prisma.invoice.findMany({
+      where: { ...periodWhere, type: "COMMISSION", status: { not: "CANCELLED" } },
+      select: { billAmount: true },
+    }),
+    prisma.invoice.findMany({
+      where: { ...periodWhere, type: "PURCHASE", status: { not: "CANCELLED" } },
+      select: { billAmount: true },
+    }),
   ]);
 
   const salesTurnover = sales.reduce((s, i) => s + toNumber(i.billAmount), 0);

@@ -56,20 +56,23 @@ export async function fetchPartyLedger(partyId: string) {
       invoiced,
       settled,
       tdsAmount: toNumber(inv.tdsDeducted),
-      balance: invoiced - settled,
+      // A cancelled invoice never owes anything, regardless of its original amount.
+      balance: status === "CANCELLED" ? 0 : invoiced - settled,
       paymentCount: inv.payments.length,
     };
   });
 
-  const totals = invoices.reduce(
-    (acc, inv) => {
-      acc.invoiced += toNumber(inv.totalAmount);
-      acc.received += toNumber(inv.amountPaid);
-      acc.tds += toNumber(inv.tdsDeducted);
-      return acc;
-    },
-    { invoiced: 0, received: 0, tds: 0 }
-  );
+  const totals = invoices
+    .filter((inv) => inv.status !== "CANCELLED")
+    .reduce(
+      (acc, inv) => {
+        acc.invoiced += toNumber(inv.totalAmount);
+        acc.received += toNumber(inv.amountPaid);
+        acc.tds += toNumber(inv.tdsDeducted);
+        return acc;
+      },
+      { invoiced: 0, received: 0, tds: 0 }
+    );
   const outstanding = totals.invoiced - totals.received - totals.tds;
 
   return { party, rows, totals, outstanding };
@@ -95,8 +98,9 @@ export async function fetchAllPartyBalances(): Promise<PartyBalance[]> {
 
   const balances: PartyBalance[] = [];
   for (const p of parties) {
-    const invoices = p.type === "CLIENT" ? p.salesInvoices : p.purchaseInvoices;
-    if (invoices.length === 0) continue;
+    const allInvoices = p.type === "CLIENT" ? p.salesInvoices : p.purchaseInvoices;
+    if (allInvoices.length === 0) continue;
+    const invoices = allInvoices.filter((i) => i.status !== "CANCELLED");
     const invoiced = invoices.reduce((s, i) => s + toNumber(i.totalAmount), 0);
     const settled = invoices.reduce((s, i) => s + toNumber(i.amountPaid) + toNumber(i.tdsDeducted), 0);
     balances.push({

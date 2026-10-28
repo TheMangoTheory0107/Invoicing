@@ -12,7 +12,9 @@ export const dynamic = "force-dynamic";
 export default async function ReconciliationPage({ searchParams }: { searchParams: Filters }) {
   const invoices = await fetchReconciliationRows(searchParams);
 
-  const totals = invoices.reduce(
+  const totals = invoices
+    .filter((inv) => inv.status !== "CANCELLED")
+    .reduce(
     (acc, inv) => {
       const total = toNumber(inv.totalAmount);
       const paid = toNumber(inv.amountPaid) + toNumber(inv.tdsDeducted);

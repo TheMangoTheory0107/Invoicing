@@ -22,6 +22,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const invoice = await prisma.invoice.findUnique({ where: { id: params.id } });
   if (!invoice) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+  if (invoice.status === "CANCELLED") {
+    return NextResponse.json({ error: "This invoice is cancelled — reactivate it before recording a payment." }, { status: 400 });
+  }
 
   await prisma.payment.create({
     data: {

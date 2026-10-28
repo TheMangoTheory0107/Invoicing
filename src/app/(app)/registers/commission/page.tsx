@@ -30,7 +30,7 @@ export default async function CommissionRegisterPage({
   const fyOptions = fyRows.map((r) => r.fy).sort().reverse();
   const monthOptions = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-  const totals = invoices.reduce(
+  const totals = invoices.filter((inv) => inv.status !== "CANCELLED").reduce(
     (acc, inv) => {
       acc.bill += toNumber(inv.billAmount);
       acc.gst += toNumber(inv.gstAmount);

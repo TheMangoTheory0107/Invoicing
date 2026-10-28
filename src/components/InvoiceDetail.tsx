@@ -48,6 +48,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generatingBills, setGeneratingBills] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [emailTo, setEmailTo] = useState(data.partyEmail || "");
   const [emailSubject, setEmailSubject] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
@@ -71,6 +72,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
     settled,
     data.totalAmount
   );
+  const isCancelled = data.status === "CANCELLED";
 
   async function recordPayment(e: React.FormEvent) {
     e.preventDefault();
@@ -113,6 +115,24 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
     router.refresh();
   }
 
+  async function toggleCancel(cancel: boolean) {
+    if (cancel && !confirm(`Cancel ${data.number}? It'll stay on record (marked Cancelled) but drop out of your totals.`)) return;
+    setCancelling(true);
+    const res = await fetch(`/api/invoices/${data.id}/cancel`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cancel }),
+    });
+    const resData = await res.json().catch(() => null);
+    setCancelling(false);
+    if (!res.ok) {
+      alert(resData?.error || "Could not update this invoice's status.");
+      return;
+    }
+    warnOnSyncFailure(resData?.syncResult);
+    router.refresh();
+  }
+
   async function generatePurchaseBills() {
     setGeneratingBills(true);
     const res = await fetch(`/api/invoices/${data.id}/generate-purchase-bills`, { method: "POST" });
@@ -150,7 +170,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
     <div className="space-y-6 pb-16">
       <div className="flex items-center gap-3">
         <StatusBadge status={effectiveStatus} />
-        {balance > 0.01 && (
+        {!isCancelled && balance > 0.01 && (
           <span className="text-sm font-medium text-amber-700">
             {settled > 0.01
               ? `${formatINR(balance)} still due — ${formatINR(settled)} received so far`
@@ -189,6 +209,24 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
           >
             Edit
           </Link>
+          {isCancelled ? (
+            <button
+              onClick={() => toggleCancel(false)}
+              disabled={cancelling}
+              className="rounded-md border border-slate-300 text-sm px-3 py-1.5 hover:bg-slate-50 disabled:opacity-60"
+            >
+              {cancelling ? "Reactivating…" : "Reactivate"}
+            </button>
+          ) : (
+            <button
+              onClick={() => toggleCancel(true)}
+              disabled={cancelling}
+              title={balance > 0.01 && settled > 0.01 ? "Remove recorded payments first to cancel" : undefined}
+              className="rounded-md border border-red-200 text-red-600 text-sm px-3 py-1.5 hover:bg-red-50 disabled:opacity-60"
+            >
+              {cancelling ? "Cancelling…" : "Cancel invoice"}
+            </button>
+          )}
           <button
             onClick={deleteInvoice}
             className="rounded-md border border-red-200 text-red-600 text-sm px-3 py-1.5 hover:bg-red-50"
@@ -380,7 +418,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
           </div>
         </div>
 
-        {balance > 0 && (
+        {!isCancelled && balance > 0 && (
           <form onSubmit={recordPayment} className="bg-white border border-slate-200 rounded-lg p-4 space-y-3">
             <div className="text-xs font-semibold text-slate-500 uppercase">Record a payment</div>
             <div className="grid grid-cols-2 gap-3">

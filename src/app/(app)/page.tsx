@@ -16,17 +16,17 @@ const MONTH_OPTIONS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "
 async function getOpenBalances() {
   const [salesOpen, purchaseOpen, overdueSales, overduePurchase] = await Promise.all([
     prisma.invoice.findMany({
-      where: { type: { in: ["SALES", "COMMISSION"] }, status: { not: "PAID" } },
+      where: { type: { in: ["SALES", "COMMISSION"] }, status: { notIn: ["PAID", "CANCELLED"] } },
       select: { totalAmount: true, amountPaid: true },
     }),
     prisma.invoice.findMany({
-      where: { type: "PURCHASE", status: { not: "PAID" } },
+      where: { type: "PURCHASE", status: { notIn: ["PAID", "CANCELLED"] } },
       select: { totalAmount: true, amountPaid: true },
     }),
     prisma.invoice.findMany({
       where: {
         type: { in: ["SALES", "COMMISSION"] },
-        status: { not: "PAID" },
+        status: { notIn: ["PAID", "CANCELLED"] },
         dueDate: { lt: startOfTodayUTC() },
       },
       include: { client: true },
@@ -36,7 +36,7 @@ async function getOpenBalances() {
     prisma.invoice.findMany({
       where: {
         type: "PURCHASE",
-        status: { not: "PAID" },
+        status: { notIn: ["PAID", "CANCELLED"] },
         dueDate: { lt: startOfTodayUTC() },
       },
       include: { creator: true },

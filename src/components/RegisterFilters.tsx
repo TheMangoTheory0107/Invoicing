@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 
-const STATUS_OPTIONS = ["", "UNPAID", "PARTIAL", "PAID", "OVERDUE"];
+const STATUS_OPTIONS = ["", "UNPAID", "PARTIAL", "PAID", "OVERDUE", "CANCELLED"];
 
 export default function RegisterFilters({
   fyOptions,

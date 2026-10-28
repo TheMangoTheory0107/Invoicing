@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   }
 
   const openInvoices = await prisma.invoice.findMany({
-    where: { status: { not: "PAID" } },
+    where: { status: { notIn: ["PAID", "CANCELLED"] } },
     include: { client: true, creator: true },
     orderBy: { date: "desc" },
     take: 300,

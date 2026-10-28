@@ -54,6 +54,7 @@ export default function ReconciliationFilters() {
         <option value="PARTIAL">Partial</option>
         <option value="PAID">Paid</option>
         <option value="OVERDUE">Overdue</option>
+        <option value="CANCELLED">Cancelled</option>
       </select>
       <input
         defaultValue={params.get("q") || ""}

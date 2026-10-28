@@ -19,7 +19,7 @@ export function buildInvoiceWhere(
   if (filters.month) where.month = filters.month;
 
   if (filters.status === "OVERDUE") {
-    where.status = { not: "PAID" };
+    where.status = { notIn: ["PAID", "CANCELLED"] };
     where.dueDate = { lt: startOfTodayUTC() };
   } else if (filters.status) {
     where.status = filters.status;
