@@ -17,6 +17,7 @@ const schema = z.object({
   upiId: z.string().default(""),
   termsAndConditions: z.string().default(""),
   paymentTermsDays: z.coerce.number().int().min(0).default(30),
+  purchasePaymentTermsDays: z.coerce.number().int().min(0).default(45),
   storagePath: z.string().min(1),
   brandColor: z
     .string()

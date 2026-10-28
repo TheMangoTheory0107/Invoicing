@@ -35,6 +35,7 @@ export default function SettingsForm({ settings }: { settings: Settings }) {
     upiId: settings.upiId,
     termsAndConditions: settings.termsAndConditions,
     paymentTermsDays: settings.paymentTermsDays,
+    purchasePaymentTermsDays: settings.purchasePaymentTermsDays,
     storagePath: settings.storagePath,
     brandColor: settings.brandColor,
     geminiApiKey: settings.geminiApiKey,
@@ -131,11 +132,18 @@ export default function SettingsForm({ settings }: { settings: Settings }) {
           <Field label="GSTIN" value={form.gstin} onChange={(e) => set("gstin", e.target.value)} />
           <Field label="PAN" value={form.pan} onChange={(e) => set("pan", e.target.value)} />
           <Field
-            label="Default payment terms (days)"
+            label="Sales & Commission payment terms (days)"
             type="number"
             min={0}
             value={form.paymentTermsDays}
             onChange={(e) => set("paymentTermsDays", parseInt(e.target.value) || 0)}
+          />
+          <Field
+            label="Purchase bill payment terms (days)"
+            type="number"
+            min={0}
+            value={form.purchasePaymentTermsDays}
+            onChange={(e) => set("purchasePaymentTermsDays", parseInt(e.target.value) || 0)}
           />
         </div>
       </div>

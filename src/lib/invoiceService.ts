@@ -275,7 +275,7 @@ export async function createPurchaseInvoice(
   const fy = financialYearFor(date);
   const month = monthLabel(date);
   const settings = await getSettings();
-  const dueDate = input.dueDate ? parseDateOnly(input.dueDate) : addDays(date, settings.paymentTermsDays);
+  const dueDate = input.dueDate ? parseDateOnly(input.dueDate) : addDays(date, settings.purchasePaymentTermsDays);
 
   const totalAmount = input.billAmount + input.gstAmount + input.reimbursements;
   const number = await allocateInvoiceNumber("PURCHASE", fy);

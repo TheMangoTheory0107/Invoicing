@@ -26,6 +26,8 @@ model Settings {
   upiId              String @default("")
   termsAndConditions String @default("1. GST under Reverse Charge Mechanism: GST is not payable under the Reverse Charge Mechanism (RCM).\n2. Payment Terms: Payment must be made in full on or before the due date specified in the invoice. In the event of delayed payment, interest at the rate of 24% per annum may be charged on the outstanding amount from the due date until the date of actual payment.\n3. Cheque Return Charges: In the event of a bank cheque being returned or dishonoured, the recipient/customer shall be liable to pay Rs. 500/- towards cheque return and related bank charges.\n4. TDS Deduction: Where applicable, TDS may be deducted at the rate of 2% under Section 194C of the Income Tax Act, 1961, calculated on the taxable value of the invoice, excluding the Goods and Services Tax (GST) component. The applicable TDS certificate shall be provided by the recipient/customer within the prescribed period.\n5. Amendment of Terms: We reserve the right to modify, amend, or update these Terms & Conditions from time to time without prior notice. The revised terms shall be applicable from the date of such amendment.")
   paymentTermsDays   Int    @default(30)
+  // Purchase bills run on their own terms, separate from what you give clients.
+  purchasePaymentTermsDays Int @default(45)
   storagePath        String @default("./storage/invoices")
   brandColor         String  @default("#134F5C")
   logoPath           String?
