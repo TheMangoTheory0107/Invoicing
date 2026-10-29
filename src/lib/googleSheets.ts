@@ -83,11 +83,46 @@ async function findRowByKey(
 
 const HIGHLIGHT_YELLOW = { red: 1, green: 1, blue: 0 };
 
-// Every tab in the workbook that happens to have both a "Link" and a "Bill No" column — the
-// monthly creator-tracking tabs (named like "Oct'25", "Nov'26", ...) — gets scanned for rows
-// whose Link matches one of this invoice's line items. The sheet's own team reshuffles these
-// tabs' columns most months (renamed, added, or dropped), so headers are looked up fresh per
-// tab rather than assumed; a tab missing either header is simply skipped, never guessed at.
+// Only tabs from Apr'26 onward are in scope — older months (last FY) are closed out and
+// shouldn't be touched. "Apr'26"/"Nov'26"/"July'26" etc.; a tab name that doesn't parse as a
+// month'year at all (Agencies, Sales Register, Invoice, ...) is never in scope either way.
+const MONTH_SCAN_CUTOFF = { year: 2026, month: 4 }; // April 2026
+const MONTH_NUMBERS: Record<string, number> = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+
+function tabInScope(title: string): boolean {
+  const match = title.trim().match(/^([A-Za-z]+)'(\d{2})$/);
+  if (!match) return false;
+  const monthNum = MONTH_NUMBERS[match[1].toLowerCase()];
+  if (!monthNum) return false;
+  const year = 2000 + parseInt(match[2], 10);
+  return year > MONTH_SCAN_CUTOFF.year || (year === MONTH_SCAN_CUTOFF.year && monthNum >= MONTH_SCAN_CUTOFF.month);
+}
+
+// A share link carries a random per-copy tracking token in its query string (Instagram's
+// ?xtok=/?obrf=/?rpxt=/... vary every time the same reel is re-shared) — the actual content is
+// identified by the path alone, so that's all that's compared.
+function normalizeLink(link: string): string {
+  return link.trim().split(/[?#]/)[0].replace(/\/+$/, "");
+}
+
+// Every in-scope tab that happens to have both a "Link" and a "Bill No" column — the monthly
+// creator-tracking tabs (named like "Oct'25", "Nov'26", ...) — gets scanned for rows whose Link
+// matches one of this invoice's line items. The sheet's own team reshuffles these tabs'
+// columns most months (renamed, added, or dropped), so headers are looked up fresh per tab
+// rather than assumed; a tab missing either header is simply skipped, never guessed at.
 async function findLinkTrackingTabs(
   sheets: Awaited<ReturnType<typeof getSheetsClient>>,
   spreadsheetId: string
@@ -95,7 +130,7 @@ async function findLinkTrackingTabs(
   const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets.properties" });
   const tabs = (meta.data.sheets || [])
     .map((s) => ({ sheetId: s.properties?.sheetId, title: s.properties?.title }))
-    .filter((t): t is { sheetId: number; title: string } => t.sheetId != null && !!t.title);
+    .filter((t): t is { sheetId: number; title: string } => t.sheetId != null && !!t.title && tabInScope(t.title));
 
   const norm = (s: string) => s.trim().toLowerCase();
   const qualifying: { sheetId: number; title: string; linkCol: number; billNoCol: number; totalAmountCol: number }[] = [];
@@ -133,7 +168,7 @@ export async function syncLineItemLinksToMonthlySheets(params: {
   const sheets = getSheetsClient(serviceAccountJson);
   try {
     const tabs = await findLinkTrackingTabs(sheets, spreadsheetId);
-    const byLink = new Map(links.map((l) => [l.link, l.amount]));
+    const byLink = new Map(links.map((l) => [normalizeLink(l.link), l.amount]));
 
     const requests: Record<string, unknown>[] = [];
     let matched = 0;
@@ -147,8 +182,10 @@ export async function syncLineItemLinksToMonthlySheets(params: {
       const linkRows = res.data.values || [];
 
       for (let i = 0; i < linkRows.length; i++) {
-        const cellLink = String(linkRows[i][0] || "").trim();
-        if (!cellLink || !byLink.has(cellLink)) continue;
+        const rawCellLink = String(linkRows[i][0] || "").trim();
+        if (!rawCellLink) continue;
+        const cellLink = normalizeLink(rawCellLink);
+        if (!byLink.has(cellLink)) continue;
         const amount = byLink.get(cellLink)!;
         const rowIndex = i + 1; // data starts at sheet row 2 -> 0-indexed grid row 1
 
@@ -235,8 +272,9 @@ export async function backfillLinksAcrossInvoices(params: {
       });
       const linkRows = res.data.values || [];
       for (let i = 0; i < linkRows.length; i++) {
-        const cellLink = String(linkRows[i][0] || "").trim();
-        if (!cellLink) continue;
+        const rawCellLink = String(linkRows[i][0] || "").trim();
+        if (!rawCellLink) continue;
+        const cellLink = normalizeLink(rawCellLink);
         const entry = { sheetId: tab.sheetId, rowIndex: i + 1, billNoCol: tab.billNoCol, totalAmountCol: tab.totalAmountCol };
         const list = linkIndex.get(cellLink);
         if (list) list.push(entry);
@@ -251,7 +289,7 @@ export async function backfillLinksAcrossInvoices(params: {
     for (const inv of invoices) {
       let invoiceHadMatch = false;
       for (const { link, amount } of inv.links) {
-        const targets = linkIndex.get(link);
+        const targets = linkIndex.get(normalizeLink(link));
         if (!targets) continue;
         for (const t of targets) {
           matched++;
