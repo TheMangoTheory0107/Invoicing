@@ -189,6 +189,37 @@ model Payment {
   createdAt DateTime @default(now())
 }
 
+// Simple payroll tracking — who gets paid, how much per month, and a log of what was actually
+// paid when. Not statutory payroll (no PF/ESI/TDS-on-salary/Form 16) — just "how much did we
+// pay which employee, and when" the way it was asked for.
+model Employee {
+  id            String   @id @default(cuid())
+  name          String
+  monthlySalary Decimal  @default(75000)
+  email         String?
+  phone         String?
+  notes         String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  payments SalaryPayment[]
+}
+
+model SalaryPayment {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date       DateTime
+  amount     Decimal
+  method     String?
+  reference  String?
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  @@index([employeeId])
+}
+
 model SheetSyncConfig {
   id                 Int     @id @default(1)
   spreadsheetId      String  @default("")

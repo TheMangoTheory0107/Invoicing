@@ -30,6 +30,10 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string }[] }[] 
     ],
   },
   {
+    label: "Payroll",
+    items: [{ href: "/payroll", label: "Employees" }],
+  },
+  {
     label: "Setup",
     items: [
       { href: "/parties/clients", label: "Clients / Agencies" },
