@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/sync-form-invoices",
+      "schedule": "*/30 * * * *"
+    }
+  ]
+}

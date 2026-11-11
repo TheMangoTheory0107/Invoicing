@@ -10,6 +10,9 @@ const schema = z.object({
   serviceAccountJson: z.string().default(""),
   enabled: z.boolean().default(false),
   driveFolderId: z.string().default(""),
+  formResponsesSpreadsheetId: z.string().default(""),
+  formResponsesSheetName: z.string().default("Form Responses 1"),
+  formResponsesImpersonate: z.string().default(""),
 });
 
 export async function PUT(req: NextRequest) {

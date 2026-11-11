@@ -12,6 +12,9 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     serviceAccountJson: config.serviceAccountJson,
     enabled: config.enabled,
     driveFolderId: config.driveFolderId,
+    formResponsesSpreadsheetId: config.formResponsesSpreadsheetId,
+    formResponsesSheetName: config.formResponsesSheetName,
+    formResponsesImpersonate: config.formResponsesImpersonate,
   });
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -26,6 +29,12 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
   const [backfilling, setBackfilling] = useState(false);
   const [backfillResult, setBackfillResult] = useState<
     | { ok: true; matched: number; invoicesMatched: number; invoicesChecked: number; invoicesWithLinks: number }
+    | { ok: false; error: string }
+    | null
+  >(null);
+  const [formSyncing, setFormSyncing] = useState(false);
+  const [formSyncResult, setFormSyncResult] = useState<
+    | { ok: true; checked: number; created: number; matchedExisting: number; flagged: number; errors: string[] }
     | { ok: false; error: string }
     | null
   >(null);
@@ -100,6 +109,17 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     const data = await res.json();
     setBackfilling(false);
     setBackfillResult(res.ok ? { ok: true, ...data } : { ok: false, error: data.error || "Could not run the backfill." });
+  }
+
+  async function onFormSync() {
+    setFormSyncing(true);
+    setFormSyncResult(null);
+    const res = await fetch("/api/settings/sheets/form-sync", { method: "POST" });
+    const data = await res.json();
+    setFormSyncing(false);
+    setFormSyncResult(
+      res.ok && data.ok !== false ? { ok: true, ...data } : { ok: false, error: data.error || data.errors?.[0] || "Could not run the sync." }
+    );
   }
 
   return (
@@ -297,6 +317,89 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
               </>
             ) : (
               backfillResult.error
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="border-t border-slate-100 pt-4">
+        <h3 className="text-sm font-semibold text-slate-800">Creator bill-submission form → auto Purchase bill</h3>
+        <p className="text-xs text-slate-500 mt-1">
+          Reads your Google Form&apos;s responses sheet (a different spreadsheet from the
+          register one above). For each response with an &quot;Invoice Copy&quot; attachment: if
+          it matches a Purchase bill already in the app, the row is just marked green; otherwise
+          the attached bill is downloaded and read the same way the manual Purchase bill upload
+          works, a bill is auto-created, and the row is marked green. A row that can&apos;t be
+          processed is marked light red instead of green, so it&apos;s easy to spot and handle by
+          hand. Runs automatically every 30 minutes, plus on demand below.
+        </p>
+        <div className="grid grid-cols-2 gap-4 mt-3">
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-600 mb-1">Form responses spreadsheet ID</span>
+            <input
+              value={form.formResponsesSpreadsheetId}
+              onChange={(e) => set("formResponsesSpreadsheetId", e.target.value)}
+              placeholder="the long ID from that sheet's URL"
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+          </label>
+          <label className="block">
+            <span className="block text-xs font-medium text-slate-600 mb-1">Tab name</span>
+            <input
+              value={form.formResponsesSheetName}
+              onChange={(e) => set("formResponsesSheetName", e.target.value)}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+            />
+          </label>
+        </div>
+        <label className="block mt-4">
+          <span className="block text-xs font-medium text-slate-600 mb-1">
+            Mailbox to impersonate for reading attachments
+          </span>
+          <input
+            value={form.formResponsesImpersonate}
+            onChange={(e) => set("formResponsesImpersonate", e.target.value)}
+            placeholder="business@themangotheory.co"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+          <p className="text-xs text-slate-400 mt-1">
+            Needs domain-wide delegation for this service account to include the{" "}
+            <code className="bg-slate-100 px-1 rounded">drive.readonly</code> scope (Workspace
+            Admin Console → Security → API Controls → Domain-wide Delegation), alongside the
+            Gmail scopes already granted there.
+          </p>
+        </label>
+        <div className="flex items-center gap-3 mt-3">
+          <button
+            type="button"
+            onClick={onFormSync}
+            disabled={formSyncing || !form.formResponsesSpreadsheetId || !form.formResponsesImpersonate}
+            className="rounded-md border border-slate-300 text-sm font-medium px-4 py-2 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {formSyncing ? "Checking…" : "Check now"}
+          </button>
+          <span className="text-xs text-slate-400">Save first if you just changed these fields.</span>
+        </div>
+        {formSyncResult && (
+          <div
+            className={`rounded-md px-3 py-2 text-sm mt-2 ${
+              formSyncResult.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+            }`}
+          >
+            {formSyncResult.ok ? (
+              <>
+                Checked {formSyncResult.checked} row(s) — created {formSyncResult.created}, matched{" "}
+                {formSyncResult.matchedExisting} already-existing, flagged {formSyncResult.flagged} for review.
+                {formSyncResult.errors.length > 0 && (
+                  <ul className="list-disc list-inside mt-1">
+                    {formSyncResult.errors.map((e, i) => (
+                      <li key={i}>{e}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              formSyncResult.error
             )}
           </div>
         )}

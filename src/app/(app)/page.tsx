@@ -14,7 +14,8 @@ export const dynamic = "force-dynamic";
 const MONTH_OPTIONS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 async function getOpenBalances() {
-  const [salesOpen, purchaseOpen, overdueSales, overduePurchase] = await Promise.all([
+  const upcomingCutoff = new Date(startOfTodayUTC().getTime() + 14 * 86400000);
+  const [salesOpen, purchaseOpen, overdueSales, overduePurchase, upcomingPurchase] = await Promise.all([
     prisma.invoice.findMany({
       where: { type: { in: ["SALES", "COMMISSION"] }, status: { notIn: ["PAID", "CANCELLED"] } },
       select: { totalAmount: true, amountPaid: true },
@@ -43,6 +44,18 @@ async function getOpenBalances() {
       orderBy: { dueDate: "asc" },
       take: 8,
     }),
+    // Not overdue yet, but due within the next two weeks — usually the ~45-day Purchase
+    // payment term approaching, so there's still time to act before it's actually late.
+    prisma.invoice.findMany({
+      where: {
+        type: "PURCHASE",
+        status: { notIn: ["PAID", "CANCELLED"] },
+        dueDate: { gte: startOfTodayUTC(), lte: upcomingCutoff },
+      },
+      include: { creator: true },
+      orderBy: { dueDate: "asc" },
+      take: 8,
+    }),
   ]);
 
   const receivable = salesOpen.reduce(
@@ -54,7 +67,7 @@ async function getOpenBalances() {
     0
   );
 
-  return { receivable, payable, overdueSales, overduePurchase };
+  return { receivable, payable, overdueSales, overduePurchase, upcomingPurchase };
 }
 
 function typeLabel(type: string) {
@@ -67,7 +80,7 @@ function invoiceHref(inv: { id: string; type: string }) {
 }
 
 export default async function DashboardPage({ searchParams }: { searchParams: Filters }) {
-  const [{ receivable, payable, overdueSales, overduePurchase }, overview, invoices, fyRows] =
+  const [{ receivable, payable, overdueSales, overduePurchase, upcomingPurchase }, overview, invoices, fyRows] =
     await Promise.all([
       getOpenBalances(),
       fetchBusinessOverview(searchParams),
@@ -134,6 +147,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: Fi
         <OverdueList
           title="Overdue — Purchase (money you owe)"
           items={overduePurchase.map((i) => ({
+            id: i.id,
+            number: i.vendorInvoiceNumber || i.number,
+            party: i.creator?.name || "—",
+            amount: toNumber(i.totalAmount) - toNumber(i.amountPaid),
+            dueDate: i.dueDate,
+            type: i.type,
+          }))}
+        />
+      </div>
+
+      <div className="px-8 mt-8">
+        <OverdueList
+          title="Purchase bills to clear soon (due within 14 days)"
+          emptyMessage="Nothing due in the next 14 days."
+          items={upcomingPurchase.map((i) => ({
             id: i.id,
             number: i.vendorInvoiceNumber || i.number,
             party: i.creator?.name || "—",
@@ -267,9 +295,11 @@ function StatCard({
 function OverdueList({
   title,
   items,
+  emptyMessage = "Nothing overdue 🎉",
 }: {
   title: string;
   items: { id: string; number: string; party: string; amount: number; dueDate: Date | null; type: string }[];
+  emptyMessage?: string;
 }) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl shadow-sm">
@@ -277,7 +307,7 @@ function OverdueList({
         {title}
       </div>
       {items.length === 0 ? (
-        <div className="px-4 py-6 text-sm text-slate-400 text-center">Nothing overdue 🎉</div>
+        <div className="px-4 py-6 text-sm text-slate-400 text-center">{emptyMessage}</div>
       ) : (
         <ul className="divide-y divide-slate-100">
           {items.map((item) => (

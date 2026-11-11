@@ -43,6 +43,77 @@ export async function testSheetConnection(spreadsheetId: string, serviceAccountJ
   }
 }
 
+export interface FormResponseSheet {
+  sheetId: number;
+  headers: string[];
+  rows: { rowIndex: number; values: string[] }[]; // rowIndex is 0-indexed in grid terms (data starts at 1, header is 0)
+}
+
+// Raw read of a whole tab — used for the Google Form responses sheet, which isn't a fixed
+// register layout, just whatever columns the form happens to have.
+export async function getFormResponseSheet(
+  serviceAccountJson: string,
+  spreadsheetId: string,
+  sheetName: string
+): Promise<FormResponseSheet> {
+  const sheets = getSheetsClient(serviceAccountJson);
+  const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets.properties" });
+  const sheetMeta = (meta.data.sheets || []).find((s) => s.properties?.title === sheetName);
+  if (sheetMeta?.properties?.sheetId == null) {
+    throw new SheetSyncError(`Tab "${sheetName}" not found in that spreadsheet.`);
+  }
+  const sheetId = sheetMeta.properties.sheetId;
+
+  const res = await sheets.spreadsheets.values.get({ spreadsheetId, range: quoteSheetName(sheetName) });
+  const values = res.data.values || [];
+  const headers = (values[0] || []).map((h) => String(h ?? "").trim());
+  const rows = values.slice(1).map((row, i) => ({
+    rowIndex: i + 1,
+    values: row.map((c) => String(c ?? "")),
+  }));
+  return { sheetId, headers, rows };
+}
+
+const ROW_GREEN = { red: 0.78, green: 0.94, blue: 0.8 };
+const ROW_FLAG_RED = { red: 1, green: 0.87, blue: 0.86 };
+
+export type RowColor = "green" | "flag";
+
+// Colors an entire row's background — green for "already in the app", flag-red for "couldn't
+// process automatically, needs a look". Spans every column the sheet currently has so a wide
+// form-response row is fully marked, not just its first few cells.
+export async function colorSheetRow(params: {
+  serviceAccountJson: string;
+  spreadsheetId: string;
+  sheetId: number;
+  rowIndex: number;
+  columnCount: number;
+  color: RowColor;
+}): Promise<void> {
+  const { serviceAccountJson, spreadsheetId, sheetId, rowIndex, columnCount, color } = params;
+  const sheets = getSheetsClient(serviceAccountJson);
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: rowIndex,
+              endRowIndex: rowIndex + 1,
+              startColumnIndex: 0,
+              endColumnIndex: columnCount,
+            },
+            cell: { userEnteredFormat: { backgroundColor: color === "green" ? ROW_GREEN : ROW_FLAG_RED } },
+            fields: "userEnteredFormat.backgroundColor",
+          },
+        },
+      ],
+    },
+  });
+}
+
 function quoteSheetName(sheetName: string): string {
   return `'${sheetName.replace(/'/g, "''")}'`;
 }

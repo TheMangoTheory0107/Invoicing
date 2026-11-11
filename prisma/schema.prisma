@@ -126,6 +126,10 @@ model Invoice {
   // never generates its own PDF for these. False (manual entry, no upload) still gets a
   // generated fallback PDF, since there's nothing else to show.
   hasSourcePdf         Boolean @default(false)
+  // The Drive file ID (from the "Invoice Copy" column) of the form submission this bill was
+  // auto-created from, if any — lets the form-ingest sync tell "already handled" apart from
+  // "new", without needing to re-read the sheet's own row coloring back.
+  formSubmissionFileId String? @unique
 
   linkedSalesInvoiceId String? // for PURCHASE invoices generated from a SALES invoice
 
@@ -235,6 +239,16 @@ model SheetSyncConfig {
   // generated invoice PDF gets filed into, under Type/FY subfolders. Empty = Drive sync off,
   // independent of the Sheets sync `enabled` flag above (both share the one service account).
   driveFolderId      String  @default("")
+  // The separate spreadsheet a Google Form (creators submitting their own bill + Invoice Copy
+  // upload) writes responses into — a different file from `spreadsheetId` above, which is the
+  // main Sales/Commission/Purchase Register workbook. Needs sharing (Editor) with the same
+  // service account for the sheet reads/writes; the "Invoice Copy" attachment itself is read
+  // via domain-wide delegation instead, since those files live outside any shared folder.
+  formResponsesSpreadsheetId String @default("")
+  formResponsesSheetName     String @default("Form Responses 1")
+  // The mailbox the service account impersonates via domain-wide delegation to read the
+  // uploaded "Invoice Copy" files — same impersonated address already used for Gmail sending.
+  formResponsesImpersonate   String @default("")
 }
 
 model User {

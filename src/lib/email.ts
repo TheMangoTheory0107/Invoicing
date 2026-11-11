@@ -37,6 +37,29 @@ export interface InvoiceEmailParams {
   attachment: { filename: string; content: Buffer };
 }
 
+// A bare notification email, no attachment — used for internal alerts (e.g. "a new Purchase
+// bill was auto-created") rather than sending an invoice to a client.
+export async function sendPlainEmail(params: {
+  fromAddress: string;
+  appPassword: string;
+  fromName: string;
+  to: string;
+  subject: string;
+  html: string;
+}): Promise<void> {
+  const { fromAddress, appPassword, fromName, to, subject, html } = params;
+  if (!fromAddress || !appPassword) {
+    throw new EmailSendError("No sending email configured — add one in Settings → Email first.");
+  }
+  const transport = getTransport(fromAddress, appPassword);
+  try {
+    await transport.sendMail({ from: `"${fromName}" <${fromAddress}>`, to, subject, html });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new EmailSendError(`Could not send the email. (${message})`);
+  }
+}
+
 export async function sendInvoiceEmail(params: InvoiceEmailParams): Promise<void> {
   const { fromAddress, appPassword, fromName, to, subject, html, attachment } = params;
   if (!fromAddress || !appPassword) {

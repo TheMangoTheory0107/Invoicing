@@ -23,6 +23,57 @@ function getDriveClient(json: string) {
   return google.drive({ version: "v3", auth });
 }
 
+// Form-upload files live in the form owner's own Drive, not a folder anyone's explicitly
+// shared with the service account — domain-wide delegation (same mechanism already granted
+// for Gmail) is what lets the service account read them, impersonating that mailbox.
+function getDriveClientAsUser(json: string, impersonate: string) {
+  const key = parseServiceAccount(json);
+  const auth = new google.auth.JWT({
+    email: key.client_email,
+    key: key.private_key,
+    scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+    subject: impersonate,
+  });
+  return google.drive({ version: "v3", auth });
+}
+
+// Pulls the file ID out of whichever Drive link shape shows up — Form file-upload responses
+// use "open?id=", but "/file/d/ID/view" and bare "/d/ID" links are handled too.
+export function extractDriveFileId(link: string): string | null {
+  const match =
+    link.match(/[?&]id=([^&]+)/) || link.match(/\/file\/d\/([^/]+)/) || link.match(/\/d\/([^/]+)/);
+  return match?.[1]?.trim() || null;
+}
+
+export async function downloadDriveFileAsUser(params: {
+  serviceAccountJson: string;
+  impersonate: string;
+  fileId: string;
+}): Promise<{ buffer: Buffer; mimeType: string; name: string }> {
+  const drive = getDriveClientAsUser(params.serviceAccountJson, params.impersonate);
+  try {
+    const meta = await drive.files.get({
+      fileId: params.fileId,
+      fields: "name, mimeType",
+      supportsAllDrives: true,
+    });
+    const res = await drive.files.get(
+      { fileId: params.fileId, alt: "media", supportsAllDrives: true },
+      { responseType: "arraybuffer" }
+    );
+    return {
+      buffer: Buffer.from(res.data as ArrayBuffer),
+      mimeType: meta.data.mimeType || "application/octet-stream",
+      name: meta.data.name || "attachment",
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new DriveSyncError(
+      `Could not download the attached file as ${params.impersonate}. Make sure domain-wide delegation for this service account includes the drive.readonly scope. (${message})`
+    );
+  }
+}
+
 async function findOrCreateFolder(
   drive: ReturnType<typeof getDriveClient>,
   name: string,
