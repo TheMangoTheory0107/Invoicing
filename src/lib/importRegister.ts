@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import { financialYearFor, monthLabel } from "@/lib/fy";
 
 export type ImportRow = Record<string, string>;
@@ -8,17 +9,26 @@ function normalizeHeader(h: unknown): string {
   return String(h ?? "").trim();
 }
 
-export async function parseUploadedFile(buffer: Buffer, filename: string): Promise<ImportRow[]> {
+// Reads any supported upload into a plain 2D array of trimmed cell strings, with no assumption
+// about which row holds the headers — callers that know where their header row lives (e.g. bank
+// exports with several rows of letterhead first) scan this themselves.
+export async function loadRawRows(buffer: Buffer, filename: string): Promise<string[][]> {
   const lower = filename.toLowerCase();
 
   if (lower.endsWith(".csv")) {
     const text = buffer.toString("utf-8");
-    const parsed = Papa.parse<ImportRow>(text, { header: true, skipEmptyLines: true });
-    return parsed.data.map((row) => {
-      const clean: ImportRow = {};
-      for (const [k, v] of Object.entries(row)) clean[normalizeHeader(k)] = String(v ?? "").trim();
-      return clean;
-    });
+    const parsed = Papa.parse<string[]>(text, { skipEmptyLines: true });
+    return parsed.data.map((row) => row.map((v) => String(v ?? "").trim()));
+  }
+
+  // Legacy Excel 97-2003 binary format (.xls) — ExcelJS only understands the modern OOXML
+  // (.xlsx) zip format, so this needs a separate reader.
+  if (lower.endsWith(".xls")) {
+    const wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    if (!sheet) return [];
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: "" });
+    return rows.map((row) => row.map((v) => xlsCellToString(v)));
   }
 
   const wb = new ExcelJS.Workbook();
@@ -26,41 +36,64 @@ export async function parseUploadedFile(buffer: Buffer, filename: string): Promi
   const ws = wb.worksheets[0];
   if (!ws) return [];
 
-  const headers: string[] = [];
-  ws.getRow(1).eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    headers[colNumber - 1] = normalizeHeader(cell.value);
+  const rows: string[][] = [];
+  ws.eachRow((row) => {
+    const cells: string[] = [];
+    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+      cells[colNumber - 1] = excelCellToString(cell);
+    });
+    rows.push(cells);
   });
+  return rows;
+}
 
+function xlsCellToString(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString();
+  return String(value).trim();
+}
+
+function excelCellToString(cell: ExcelJS.Cell): string {
+  let value: string;
+  try {
+    if (cell.value instanceof Date) {
+      value = cell.value.toISOString();
+    } else if (cell.value && typeof cell.value === "object" && "text" in cell.value) {
+      value = String((cell.value as { text: unknown }).text ?? "");
+    } else {
+      // cell.text throws for a merged cell's non-master slots (a known exceljs quirk) —
+      // fall straight to the raw value in that case.
+      value = cell.text ?? String(cell.value ?? "");
+    }
+  } catch {
+    value = cell.value != null ? String(cell.value) : "";
+  }
+  return value.trim();
+}
+
+// Converts raw rows into header-keyed objects, treating `headerRowIndex` as the header row.
+export function rowsToObjects(rawRows: string[][], headerRowIndex: number): ImportRow[] {
+  const headers = (rawRows[headerRowIndex] || []).map(normalizeHeader);
   const rows: ImportRow[] = [];
-  ws.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return;
+  for (let i = headerRowIndex + 1; i < rawRows.length; i++) {
+    const raw = rawRows[i];
+    if (!raw) continue;
     const obj: ImportRow = {};
     let hasValue = false;
-    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      const header = headers[colNumber - 1];
+    headers.forEach((header, idx) => {
       if (!header) return;
-      let value: string;
-      try {
-        if (cell.value instanceof Date) {
-          value = cell.value.toISOString();
-        } else if (cell.value && typeof cell.value === "object" && "text" in cell.value) {
-          value = String((cell.value as { text: unknown }).text ?? "");
-        } else {
-          // cell.text throws for a merged cell's non-master slots (a known exceljs quirk) —
-          // fall straight to the raw value in that case.
-          value = cell.text ?? String(cell.value ?? "");
-        }
-      } catch {
-        value = cell.value != null ? String(cell.value) : "";
-      }
-      value = value.trim();
+      const value = (raw[idx] ?? "").trim();
       if (value) hasValue = true;
       obj[header] = value;
     });
     if (hasValue) rows.push(obj);
-  });
-
+  }
   return rows;
+}
+
+export async function parseUploadedFile(buffer: Buffer, filename: string): Promise<ImportRow[]> {
+  const rawRows = await loadRawRows(buffer, filename);
+  return rowsToObjects(rawRows, 0);
 }
 
 // Case-insensitive, whitespace-tolerant field lookup by any of several candidate header names.
@@ -88,11 +121,12 @@ export function parseFlexibleDate(value: string): Date | null {
   const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (ymd) return new Date(Date.UTC(+ymd[1], +ymd[2] - 1, +ymd[3]));
 
-  const slash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value);
+  const slash = /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/.exec(value);
   if (slash) {
     const a = +slash[1];
     const b = +slash[2];
-    const year = +slash[3];
+    // Bank statement exports often use 2-digit years (e.g. "11/11/26").
+    const year = slash[3].length === 2 ? (+slash[3] <= 68 ? 2000 + +slash[3] : 1900 + +slash[3]) : +slash[3];
     // Slash-separated dates are ambiguous (DD/MM vs MM/DD) and this data mixes both. Prefer the
     // Indian DD/MM convention used everywhere else in these sheets, but fall back to MM/DD when
     // the first number can't be a day-of-month interpretation... actually: prefer whichever
