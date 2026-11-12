@@ -114,31 +114,43 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
   async function onFormSync() {
     setFormSyncing(true);
     setFormSyncResult(null);
-    // Saves whatever's currently in the fields first — "Check now" should reflect what's on
-    // screen, not whatever was last saved, which silently checked a stale/empty config before.
-    const saveRes = await fetch("/api/settings/sheets", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    if (!saveRes.ok) {
-      setFormSyncing(false);
-      setFormSyncResult({ ok: false, error: "Could not save these fields before checking — fix any errors above and try again." });
-      return;
-    }
-    setSavedAt(Date.now());
-    const res = await fetch("/api/settings/sheets/form-sync", { method: "POST" });
-    const data = await res.json();
-    setFormSyncing(false);
-    if (res.ok && data.attempted === false) {
-      setFormSyncResult({
-        ok: false,
-        error: "Nothing to check — fill in the Spreadsheet ID, Tab name, and impersonate mailbox above (and the service account JSON further up this page), then try again.",
+    // Wrapped end to end — a slow extraction can push the request past the server's time
+    // limit, or the network can just drop; either way the button must always come back to life
+    // instead of being stuck on "Checking..." forever.
+    try {
+      // Saves whatever's currently in the fields first — "Check now" should reflect what's on
+      // screen, not whatever was last saved, which silently checked a stale/empty config before.
+      const saveRes = await fetch("/api/settings/sheets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
       });
-    } else {
-      setFormSyncResult(
-        res.ok && data.ok !== false ? { ok: true, ...data } : { ok: false, error: data.error || data.errors?.[0] || "Could not run the sync." }
-      );
+      if (!saveRes.ok) {
+        setFormSyncResult({ ok: false, error: "Could not save these fields before checking — fix any errors above and try again." });
+        return;
+      }
+      setSavedAt(Date.now());
+      const res = await fetch("/api/settings/sheets/form-sync", { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!data) {
+        setFormSyncResult({
+          ok: false,
+          error: "The check didn't finish in time (a bill can be slow to read) — your settings are saved, just click Check now again to pick up where it left off.",
+        });
+      } else if (res.ok && data.attempted === false) {
+        setFormSyncResult({
+          ok: false,
+          error: "Nothing to check — fill in the Spreadsheet ID, Tab name, and impersonate mailbox above (and the service account JSON further up this page), then try again.",
+        });
+      } else {
+        setFormSyncResult(
+          res.ok && data.ok !== false ? { ok: true, ...data } : { ok: false, error: data.error || data.errors?.[0] || "Could not run the sync." }
+        );
+      }
+    } catch {
+      setFormSyncResult({ ok: false, error: "Could not reach the server — check your connection and click Check now again." });
+    } finally {
+      setFormSyncing(false);
     }
   }
 

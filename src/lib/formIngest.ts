@@ -12,8 +12,10 @@ import { sendPlainEmail } from "@/lib/email";
 
 // Only this many brand-new bills get Gemini-extracted per run — each one can take up to ~45s
 // (the extraction's own retry/fallback chain), and this has to fit inside the serverless
-// function's timeout. Anything beyond this count on a given run just waits for the next one.
-const MAX_NEW_PER_RUN = 3;
+// function's 60s timeout, so even 2 worst-case extractions back to back can time the whole
+// request out. Anything beyond this count on a given run just waits for the next one (or the
+// next manual "Check now" click, which is cheap to repeat).
+const MAX_NEW_PER_RUN = 1;
 // Loose amount match tolerance (rupees) when reconciling a sheet row against an invoice that's
 // already in the app but wasn't created from this form — rounding differences only.
 const AMOUNT_TOLERANCE = 2;
@@ -228,12 +230,29 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
       if (vendorInvoiceNumber) {
         const existingForCreator = await prisma.invoice.findMany({
           where: { type: "PURCHASE", creatorId: creator.id, vendorInvoiceNumber: { not: null } },
-          select: { vendorInvoiceNumber: true },
+          select: { id: true, vendorInvoiceNumber: true, formSubmissionFileId: true },
         });
-        const isDuplicate = existingForCreator.some(
+        const duplicate = existingForCreator.find(
           (inv) => inv.vendorInvoiceNumber?.trim().toLowerCase() === vendorInvoiceNumber.toLowerCase()
         );
-        if (isDuplicate) throw new Error(`Looks like a duplicate — ${creator.name} already has an invoice numbered "${vendorInvoiceNumber}" on file.`);
+        // The earlier name/amount/date reconciliation pass missed this one, but the extracted
+        // invoice number says it's the same bill the creator already has on file — link it to
+        // that existing bill (if it isn't linked to some other row already) instead of treating
+        // a correctly-caught duplicate as a failure.
+        if (duplicate && !duplicate.formSubmissionFileId) {
+          await prisma.invoice.update({ where: { id: duplicate.id }, data: { formSubmissionFileId: fileId } });
+          await colorSheetRow({
+            serviceAccountJson: config.serviceAccountJson,
+            spreadsheetId: config.formResponsesSpreadsheetId,
+            sheetId: sheet.sheetId,
+            rowIndex: row.rowIndex,
+            columnCount: sheet.headers.length,
+            color: "green",
+          }).catch(() => {});
+          matchedExisting++;
+          continue;
+        }
+        if (duplicate) throw new Error(`Looks like a duplicate — ${creator.name} already has an invoice numbered "${vendorInvoiceNumber}" on file.`);
       }
 
       const { invoice } = await createPurchaseInvoice({
