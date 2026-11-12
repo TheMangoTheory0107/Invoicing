@@ -5,7 +5,7 @@ import { extractPurchaseBill, GeminiExtractError } from "@/lib/geminiExtract";
 import { detectPurchaseBillFileKind, mimeTypeForKind } from "@/lib/purchaseBillFileType";
 import { xlsxBufferToText, csvBufferToText } from "@/lib/purchaseBillTextExtract";
 import { extractDriveFileId, downloadDriveFileAsUser, DriveSyncError } from "@/lib/googleDrive";
-import { getFormResponseSheet, colorSheetRow, SheetSyncError } from "@/lib/googleSheets";
+import { getFormResponseSheet, colorSheetRow, writeStatusCell, SheetSyncError } from "@/lib/googleSheets";
 import { syncOriginalBillToDrive } from "@/lib/driveSync";
 import { createPurchaseInvoice } from "@/lib/invoiceService";
 import { sendPlainEmail } from "@/lib/email";
@@ -20,6 +20,11 @@ const MAX_NEW_PER_RUN = 1;
 // already in the app but wasn't created from this form — rounding differences only.
 const AMOUNT_TOLERANCE = 2;
 const DATE_PROXIMITY_DAYS = 10;
+// Column O — not one of the form's own columns, so free to use. Holds the reason a row couldn't
+// be auto-processed, and doubles as a persistent "already attempted this one" marker so a
+// permanently-failing row doesn't eat the per-run Gemini budget on every single run forever and
+// block every row after it. Clearing the cell by hand asks for a retry.
+const STATUS_COL = 14;
 
 export interface FormIngestSummary {
   attempted: boolean;
@@ -153,6 +158,16 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
         columnCount: sheet.headers.length,
         color: "green",
       }).catch(() => {});
+      if (row.values[STATUS_COL]?.trim()) {
+        await writeStatusCell({
+          serviceAccountJson: config.serviceAccountJson,
+          spreadsheetId: config.formResponsesSpreadsheetId,
+          sheetName,
+          rowIndex: row.rowIndex,
+          columnIndex: STATUS_COL,
+          value: "",
+        }).catch(() => {});
+      }
       continue;
     }
 
@@ -171,20 +186,28 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
     // Reconcile against a bill already entered some other way, before touching Gemini at all.
     // No DB-level name filter here — a reverse-direction loose match (the row's name contains
     // the stored creator's shorter name, not the other way round) would otherwise never even
-    // be fetched, so every un-tagged Purchase bill is pulled and matched in JS instead.
-    if (rowNameCandidates.length > 0 && rowPayout != null) {
+    // be fetched, so every un-tagged Purchase bill is pulled and matched in JS instead. Matches
+    // either by (loose name + amount + nearby date) or by (the sheet's own Invoice Number +
+    // amount) — the latter catches cases where the uploaded file was renamed, saved as a
+    // different file type, or the creator name on file doesn't cleanly match the form's name
+    // field, since the invoice number + amount pairing doesn't depend on any of that.
+    if (rowPayout != null && (rowNameCandidates.length > 0 || rowInvoiceNumber)) {
       const candidates = await prisma.invoice.findMany({
         where: { type: "PURCHASE", formSubmissionFileId: null },
         include: { creator: true },
       });
       const reconciled = candidates.find((inv) => {
+        const amountOk = Math.abs(toNumber(inv.totalAmount) - rowPayout) <= AMOUNT_TOLERANCE;
+        if (!amountOk) return false;
+        const invoiceNumberOk =
+          !!rowInvoiceNumber && !!inv.vendorInvoiceNumber && rowInvoiceNumber.toLowerCase() === inv.vendorInvoiceNumber.trim().toLowerCase();
+        if (invoiceNumberOk) return true;
         const creatorName = inv.creator?.name.trim().toLowerCase() || "";
         if (!creatorName) return false;
         const nameOk = rowNameCandidates.some((n) => creatorName.includes(n) || n.includes(creatorName));
-        const amountOk = Math.abs(toNumber(inv.totalAmount) - rowPayout) <= AMOUNT_TOLERANCE;
         const dateOk =
           !rowDate || !inv.date || Math.abs(inv.date.getTime() - rowDate.getTime()) <= DATE_PROXIMITY_DAYS * 86400000;
-        return nameOk && amountOk && dateOk;
+        return nameOk && dateOk;
       });
       if (reconciled) {
         await prisma.invoice.update({ where: { id: reconciled.id }, data: { formSubmissionFileId: fileId } });
@@ -196,10 +219,25 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
           columnCount: sheet.headers.length,
           color: "green",
         }).catch(() => {});
+        if (row.values[STATUS_COL]?.trim()) {
+          await writeStatusCell({
+            serviceAccountJson: config.serviceAccountJson,
+            spreadsheetId: config.formResponsesSpreadsheetId,
+            sheetName,
+            rowIndex: row.rowIndex,
+            columnIndex: STATUS_COL,
+            value: "",
+          }).catch(() => {});
+        }
         matchedExisting++;
         continue;
       }
     }
+
+    // A row already flagged with a reason on a previous run is left alone — otherwise a single
+    // permanently-failing row would eat the one-per-run Gemini budget forever and block every
+    // row after it from ever getting a turn. Clearing the cell by hand asks for a fresh attempt.
+    if (row.values[STATUS_COL]?.trim()) continue;
 
     // Brand new — needs Gemini. Budget-limited per run.
     if (newProcessedThisRun >= MAX_NEW_PER_RUN) continue;
@@ -327,6 +365,14 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
         rowIndex: row.rowIndex,
         columnCount: sheet.headers.length,
         color: "flag",
+      }).catch(() => {});
+      await writeStatusCell({
+        serviceAccountJson: config.serviceAccountJson,
+        spreadsheetId: config.formResponsesSpreadsheetId,
+        sheetName,
+        rowIndex: row.rowIndex,
+        columnIndex: STATUS_COL,
+        value: message,
       }).catch(() => {});
     }
   }

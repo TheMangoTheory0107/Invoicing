@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { SheetSyncConfig } from "@prisma/client";
 
 export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
@@ -33,8 +33,10 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     | null
   >(null);
   const [formSyncing, setFormSyncing] = useState(false);
+  const [formSyncLooping, setFormSyncLooping] = useState(false);
+  const formSyncStopRef = useRef(false);
   const [formSyncResult, setFormSyncResult] = useState<
-    | { ok: true; checked: number; created: number; matchedExisting: number; flagged: number; errors: string[] }
+    | { ok: true; checked: number; created: number; matchedExisting: number; flagged: number; errors: string[]; rounds?: number }
     | { ok: false; error: string }
     | null
   >(null);
@@ -111,46 +113,89 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     setBackfillResult(res.ok ? { ok: true, ...data } : { ok: false, error: data.error || "Could not run the backfill." });
   }
 
+  type SyncRoundResult =
+    | { kind: "ok"; checked: number; created: number; matchedExisting: number; flagged: number; errors: string[] }
+    | { kind: "not-configured" }
+    | { kind: "timeout" }
+    | { kind: "error"; error: string };
+
+  // One call to the sync endpoint — saves whatever's currently in the fields first, so a check
+  // always reflects what's on screen rather than whatever was last saved.
+  async function runSyncRound(): Promise<SyncRoundResult> {
+    const saveRes = await fetch("/api/settings/sheets", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    if (!saveRes.ok) return { kind: "error", error: "Could not save these fields — fix any errors above and try again." };
+    setSavedAt(Date.now());
+    const res = await fetch("/api/settings/sheets/form-sync", { method: "POST" });
+    const data = await res.json().catch(() => null);
+    if (!data) return { kind: "timeout" };
+    if (res.ok && data.attempted === false) return { kind: "not-configured" };
+    if (!res.ok || data.ok === false) return { kind: "error", error: data.error || data.errors?.[0] || "Could not run the sync." };
+    return { kind: "ok", checked: data.checked, created: data.created, matchedExisting: data.matchedExisting, flagged: data.flagged, errors: data.errors || [] };
+  }
+
+  function describeRoundFailure(result: Extract<SyncRoundResult, { kind: "not-configured" | "timeout" | "error" }>): string {
+    if (result.kind === "timeout") {
+      return "The check didn't finish in time (a bill can be slow to read) — your settings are saved, just try again to pick up where it left off.";
+    }
+    if (result.kind === "not-configured") {
+      return "Nothing to check — fill in the Spreadsheet ID, Tab name, and impersonate mailbox above (and the service account JSON further up this page), then try again.";
+    }
+    return result.error;
+  }
+
+  // A single on-demand check — same as waiting for the once-a-day automatic run.
   async function onFormSync() {
     setFormSyncing(true);
     setFormSyncResult(null);
-    // Wrapped end to end — a slow extraction can push the request past the server's time
-    // limit, or the network can just drop; either way the button must always come back to life
-    // instead of being stuck on "Checking..." forever.
     try {
-      // Saves whatever's currently in the fields first — "Check now" should reflect what's on
-      // screen, not whatever was last saved, which silently checked a stale/empty config before.
-      const saveRes = await fetch("/api/settings/sheets", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      if (!saveRes.ok) {
-        setFormSyncResult({ ok: false, error: "Could not save these fields before checking — fix any errors above and try again." });
-        return;
-      }
-      setSavedAt(Date.now());
-      const res = await fetch("/api/settings/sheets/form-sync", { method: "POST" });
-      const data = await res.json().catch(() => null);
-      if (!data) {
-        setFormSyncResult({
-          ok: false,
-          error: "The check didn't finish in time (a bill can be slow to read) — your settings are saved, just click Check now again to pick up where it left off.",
-        });
-      } else if (res.ok && data.attempted === false) {
-        setFormSyncResult({
-          ok: false,
-          error: "Nothing to check — fill in the Spreadsheet ID, Tab name, and impersonate mailbox above (and the service account JSON further up this page), then try again.",
-        });
-      } else {
-        setFormSyncResult(
-          res.ok && data.ok !== false ? { ok: true, ...data } : { ok: false, error: data.error || data.errors?.[0] || "Could not run the sync." }
-        );
-      }
+      const result = await runSyncRound();
+      setFormSyncResult(result.kind === "ok" ? { ok: true, ...result } : { ok: false, error: describeRoundFailure(result) });
     } catch {
-      setFormSyncResult({ ok: false, error: "Could not reach the server — check your connection and click Check now again." });
+      setFormSyncResult({ ok: false, error: "Could not reach the server — check your connection and try again." });
     } finally {
       setFormSyncing(false);
+    }
+  }
+
+  // Repeats the check automatically to clear a backlog of old submissions — each round only
+  // auto-creates one brand-new bill (to stay well under the server's time limit), so catching up
+  // on many old rows would otherwise mean clicking "Check now" over and over by hand. Stops on
+  // its own once a round makes no further progress (nothing left it can resolve automatically),
+  // or can be stopped early.
+  async function onFormSyncAll() {
+    setFormSyncLooping(true);
+    formSyncStopRef.current = false;
+    setFormSyncResult(null);
+    const totals = { checked: 0, created: 0, matchedExisting: 0, flagged: 0, errors: [] as string[] };
+    let rounds = 0;
+    try {
+      while (rounds < 60 && !formSyncStopRef.current) {
+        rounds++;
+        let result: SyncRoundResult;
+        try {
+          result = await runSyncRound();
+        } catch {
+          setFormSyncResult({ ok: false, error: "Could not reach the server — check your connection and try again." });
+          return;
+        }
+        if (result.kind !== "ok") {
+          setFormSyncResult({ ok: false, error: describeRoundFailure(result) });
+          return;
+        }
+        totals.checked = result.checked;
+        totals.created += result.created;
+        totals.matchedExisting += result.matchedExisting;
+        totals.flagged += result.flagged;
+        totals.errors.push(...result.errors);
+        setFormSyncResult({ ok: true, ...totals, rounds });
+        if (result.created === 0 && result.matchedExisting === 0) break;
+      }
+    } finally {
+      setFormSyncLooping(false);
     }
   }
 
@@ -358,12 +403,16 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
         <h3 className="text-sm font-semibold text-slate-800">Creator bill-submission form → auto Purchase bill</h3>
         <p className="text-xs text-slate-500 mt-1">
           Reads your Google Form&apos;s responses sheet (a different spreadsheet from the
-          register one above). For each response with an &quot;Invoice Copy&quot; attachment: if
-          it matches a Purchase bill already in the app, the row is just marked green; otherwise
-          the attached bill is downloaded and read the same way the manual Purchase bill upload
-          works, a bill is auto-created, and the row is marked green. A row that can&apos;t be
-          processed is marked light red instead of green, so it&apos;s easy to spot and handle by
-          hand. Runs automatically every 30 minutes, plus on demand below.
+          register one above) — every row, every time, including old submissions from before
+          this was set up. For each response with an &quot;Invoice Copy&quot; attachment: if it
+          matches a Purchase bill already in the app (by creator name, invoice number, and
+          amount — so a renamed or re-saved file still matches), the row is just marked green;
+          otherwise the attached bill is downloaded and read the same way the manual Purchase
+          bill upload works, a bill is auto-created, and the row is marked green. A row that
+          can&apos;t be processed is marked light red, with the reason written into column O of
+          that row — clear that cell by hand to ask for a retry, otherwise it&apos;s left alone
+          on later runs so one bad row can&apos;t block the ones after it. Runs automatically
+          once a day, plus on demand below.
         </p>
         <div className="grid grid-cols-2 gap-4 mt-3">
           <label className="block">
@@ -405,12 +454,34 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
           <button
             type="button"
             onClick={onFormSync}
-            disabled={formSyncing || !form.formResponsesSpreadsheetId || !form.formResponsesImpersonate}
+            disabled={formSyncing || formSyncLooping || !form.formResponsesSpreadsheetId || !form.formResponsesImpersonate}
             className="rounded-md border border-slate-300 text-sm font-medium px-4 py-2 hover:bg-slate-50 disabled:opacity-60"
           >
             {formSyncing ? "Checking…" : "Check now"}
           </button>
-          <span className="text-xs text-slate-400">Save first if you just changed these fields.</span>
+          {formSyncLooping ? (
+            <button
+              type="button"
+              onClick={() => {
+                formSyncStopRef.current = true;
+              }}
+              className="rounded-md border border-slate-300 text-sm font-medium px-4 py-2 hover:bg-slate-50"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onFormSyncAll}
+              disabled={formSyncing || !form.formResponsesSpreadsheetId || !form.formResponsesImpersonate}
+              className="rounded-md border border-slate-300 text-sm font-medium px-4 py-2 hover:bg-slate-50 disabled:opacity-60"
+            >
+              Process entire backlog
+            </button>
+          )}
+          <span className="text-xs text-slate-400">
+            Checks every row, every time — old submissions included, no manual upload needed.
+          </span>
         </div>
         {formSyncResult && (
           <div
@@ -420,6 +491,8 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
           >
             {formSyncResult.ok ? (
               <>
+                {formSyncLooping && "Still going… "}
+                {formSyncResult.rounds && formSyncResult.rounds > 1 ? `Over ${formSyncResult.rounds} rounds — ` : ""}
                 Checked {formSyncResult.checked} row(s) — created {formSyncResult.created}, matched{" "}
                 {formSyncResult.matchedExisting} already-existing, flagged {formSyncResult.flagged} for review.
                 {formSyncResult.errors.length > 0 && (

@@ -114,6 +114,30 @@ export async function colorSheetRow(params: {
   });
 }
 
+// Writes (or clears, with an empty string) a single cell's text — used to leave the reason a
+// form-response row couldn't be auto-processed right next to the row itself, and doubles as the
+// "has this row already been attempted" marker: once it holds text, later runs skip straight
+// past it instead of burning the per-run budget retrying the same failure forever. Clearing the
+// cell by hand is how a human asks for it to be retried.
+export async function writeStatusCell(params: {
+  serviceAccountJson: string;
+  spreadsheetId: string;
+  sheetName: string;
+  rowIndex: number; // 0-indexed in grid terms, same as FormResponseSheet rows
+  columnIndex: number;
+  value: string;
+}): Promise<void> {
+  const { serviceAccountJson, spreadsheetId, sheetName, rowIndex, columnIndex, value } = params;
+  const sheets = getSheetsClient(serviceAccountJson);
+  const cell = `${columnLetter(columnIndex)}${rowIndex + 1}`;
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${quoteSheetName(sheetName)}!${cell}`,
+    valueInputOption: "RAW",
+    requestBody: { values: [[value]] },
+  });
+}
+
 function quoteSheetName(sheetName: string): string {
   return `'${sheetName.replace(/'/g, "''")}'`;
 }
