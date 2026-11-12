@@ -12,6 +12,7 @@ interface Candidate {
   tdsAmount: number;
   label: string;
   diff: number;
+  date: number;
 }
 
 interface TxRow {
@@ -63,9 +64,20 @@ export default function BankImportClient() {
     const data = await res.json();
     setRows(data.rows);
     setOpenInvoices(data.openInvoices);
+    // Candidates already come back oldest-invoice-first for tied amounts (see bankMatch.ts),
+    // which picks a sensible default for any one row on its own. But several rows in the same
+    // batch often share that exact same tie (e.g. six ₹6,300 payments to six different ₹6,300
+    // invoices) — without tracking what's already been defaulted to, every one of those rows
+    // would default to that same single oldest invoice. Each row instead takes the first
+    // candidate on its own list that an earlier row in this batch hasn't already claimed, so a
+    // batch of tied amounts gets spread across the actual set of outstanding invoices, oldest
+    // first — still just a starting point the dropdown can override, not a final answer.
     const initial: Record<number, Selection> = {};
+    const claimed = new Set<string>();
     data.rows.forEach((r: TxRow, i: number) => {
-      initial[i] = r.candidates[0] ? { invoiceId: r.candidates[0].invoiceId, tdsAmount: r.candidates[0].tdsAmount } : null;
+      const pick = r.candidates.find((c) => !claimed.has(c.invoiceId)) || r.candidates[0];
+      initial[i] = pick ? { invoiceId: pick.invoiceId, tdsAmount: pick.tdsAmount } : null;
+      if (pick) claimed.add(pick.invoiceId);
     });
     setSelections(initial);
   }

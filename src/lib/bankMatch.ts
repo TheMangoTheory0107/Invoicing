@@ -15,6 +15,7 @@ export interface MatchCandidate {
   tdsAmount: number;
   label: string;
   diff: number;
+  date: number; // invoice date, ms since epoch — used to break ties oldest-first (pay off the longest-outstanding bill first)
 }
 
 // A bank credit matches an outstanding Sales/Commission invoice (client paying us); a debit
@@ -52,6 +53,7 @@ export async function findCandidateMatches(tx: BankTransaction): Promise<MatchCa
         tdsAmount: 0,
         label: "Full balance",
         diff: exactDiff,
+        date: inv.date.getTime(),
       });
       continue; // an exact match is decisive for this invoice — skip TDS guesses for it
     }
@@ -72,11 +74,16 @@ export async function findCandidateMatches(tx: BankTransaction): Promise<MatchCa
           tdsAmount: impliedTds,
           label: `Balance minus ${(rate * 100).toFixed(0)}% TDS`,
           diff,
+          date: inv.date.getTime(),
         };
       }
     }
     if (best) candidates.push(best);
   }
 
-  return candidates.sort((a, b) => a.diff - b.diff).slice(0, 8);
+  // Several invoices to the same party often land on the exact same amount (e.g. a payer
+  // settling many same-value line items one by one) — when the amount alone can't tell them
+  // apart, the oldest outstanding invoice is treated as the more likely match, same as paying
+  // off the longest-standing bill first.
+  return candidates.sort((a, b) => a.diff - b.diff || a.date - b.date).slice(0, 8);
 }
