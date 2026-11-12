@@ -34,6 +34,11 @@ export interface FormIngestSummary {
   matchedExisting: number;
   flagged: number;
   errors: string[];
+  // Rows that still need a Gemini attempt but didn't get one this run, purely because the
+  // per-run budget was already spent — not rows that failed. A caller doing a multi-round
+  // catch-up should keep going as long as this is above 0, not stop just because one round
+  // happened to flag something instead of creating something.
+  remaining: number;
 }
 
 function findHeaderIndex(headers: string[], ...candidates: string[]): number {
@@ -91,7 +96,7 @@ async function matchOrCreateCreator(vendorName: string, extracted: Awaited<Retur
 export async function syncFormResponses(): Promise<FormIngestSummary> {
   const config = await prisma.sheetSyncConfig.findUnique({ where: { id: 1 } });
   if (!config?.formResponsesSpreadsheetId || !config.serviceAccountJson || !config.formResponsesImpersonate) {
-    return { attempted: false, ok: true, checked: 0, created: 0, matchedExisting: 0, flagged: 0, errors: [] };
+    return { attempted: false, ok: true, checked: 0, created: 0, matchedExisting: 0, flagged: 0, errors: [], remaining: 0 };
   }
   const settings = await getSettings();
   if (!settings.geminiApiKey) {
@@ -103,6 +108,7 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
       matchedExisting: 0,
       flagged: 0,
       errors: ["No Gemini API key configured in Settings — needed to read the attached bills."],
+      remaining: 0,
     };
   }
 
@@ -112,6 +118,7 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
   let created = 0;
   let matchedExisting = 0;
   let flagged = 0;
+  let remaining = 0;
   let newProcessedThisRun = 0;
 
   let sheet;
@@ -119,7 +126,7 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
     sheet = await getFormResponseSheet(config.serviceAccountJson, config.formResponsesSpreadsheetId, sheetName);
   } catch (err) {
     const message = err instanceof SheetSyncError ? err.message : err instanceof Error ? err.message : "Could not read the form responses sheet.";
-    return { attempted: true, ok: false, checked: 0, created: 0, matchedExisting: 0, flagged: 0, errors: [message] };
+    return { attempted: true, ok: false, checked: 0, created: 0, matchedExisting: 0, flagged: 0, errors: [message], remaining: 0 };
   }
 
   const nameCol = findHeaderIndex(sheet.headers, "Name");
@@ -137,6 +144,7 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
       matchedExisting: 0,
       flagged: 0,
       errors: ['No "Invoice Copy" column found in that sheet — check the tab name and headers in Settings.'],
+      remaining: 0,
     };
   }
 
@@ -239,8 +247,12 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
     // row after it from ever getting a turn. Clearing the cell by hand asks for a fresh attempt.
     if (row.values[STATUS_COL]?.trim()) continue;
 
-    // Brand new — needs Gemini. Budget-limited per run.
-    if (newProcessedThisRun >= MAX_NEW_PER_RUN) continue;
+    // Brand new — needs Gemini. Budget-limited per run; anything past the budget is genuinely
+    // still pending (not failed), so a multi-round catch-up knows there's more to do.
+    if (newProcessedThisRun >= MAX_NEW_PER_RUN) {
+      remaining++;
+      continue;
+    }
     newProcessedThisRun++;
 
     try {
@@ -377,5 +389,5 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
     }
   }
 
-  return { attempted: true, ok: true, checked, created, matchedExisting, flagged, errors };
+  return { attempted: true, ok: true, checked, created, matchedExisting, flagged, errors, remaining };
 }

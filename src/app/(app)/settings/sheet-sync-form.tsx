@@ -114,7 +114,7 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
   }
 
   type SyncRoundResult =
-    | { kind: "ok"; checked: number; created: number; matchedExisting: number; flagged: number; errors: string[] }
+    | { kind: "ok"; checked: number; created: number; matchedExisting: number; flagged: number; errors: string[]; remaining: number }
     | { kind: "not-configured" }
     | { kind: "timeout" }
     | { kind: "error"; error: string };
@@ -134,7 +134,15 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     if (!data) return { kind: "timeout" };
     if (res.ok && data.attempted === false) return { kind: "not-configured" };
     if (!res.ok || data.ok === false) return { kind: "error", error: data.error || data.errors?.[0] || "Could not run the sync." };
-    return { kind: "ok", checked: data.checked, created: data.created, matchedExisting: data.matchedExisting, flagged: data.flagged, errors: data.errors || [] };
+    return {
+      kind: "ok",
+      checked: data.checked,
+      created: data.created,
+      matchedExisting: data.matchedExisting,
+      flagged: data.flagged,
+      errors: data.errors || [],
+      remaining: data.remaining ?? 0,
+    };
   }
 
   function describeRoundFailure(result: Extract<SyncRoundResult, { kind: "not-configured" | "timeout" | "error" }>): string {
@@ -163,9 +171,10 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
 
   // Repeats the check automatically to clear a backlog of old submissions — each round only
   // auto-creates one brand-new bill (to stay well under the server's time limit), so catching up
-  // on many old rows would otherwise mean clicking "Check now" over and over by hand. Stops on
-  // its own once a round makes no further progress (nothing left it can resolve automatically),
-  // or can be stopped early.
+  // on many old rows would otherwise mean clicking "Check now" over and over by hand. Stops once
+  // the server says nothing is left genuinely pending (every row is either resolved or flagged
+  // with a reason) — not just because one particular round happened to flag something instead of
+  // creating something, which still leaves later rows untouched. Can also be stopped early.
   async function onFormSyncAll() {
     setFormSyncLooping(true);
     formSyncStopRef.current = false;
@@ -173,7 +182,7 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     const totals = { checked: 0, created: 0, matchedExisting: 0, flagged: 0, errors: [] as string[] };
     let rounds = 0;
     try {
-      while (rounds < 60 && !formSyncStopRef.current) {
+      while (rounds < 200 && !formSyncStopRef.current) {
         rounds++;
         let result: SyncRoundResult;
         try {
@@ -192,7 +201,7 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
         totals.flagged += result.flagged;
         totals.errors.push(...result.errors);
         setFormSyncResult({ ok: true, ...totals, rounds });
-        if (result.created === 0 && result.matchedExisting === 0) break;
+        if (result.remaining <= 0) break;
       }
     } finally {
       setFormSyncLooping(false);
