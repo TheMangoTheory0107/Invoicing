@@ -112,19 +112,16 @@ export default function SalesInvoiceForm({
   const billAmount = useMemo(() => lineItems.reduce((s, li) => s + (li.amount || 0), 0), [lineItems]);
   const totalAmount = billAmount + (gstAmount || 0) + (reimbursements || 0);
 
-  // GST auto-calculates as 18% of the bill amount whenever line items change — but if
-  // someone has manually typed a different GST figure (e.g. a zero-rated invoice), we stop
-  // overwriting it. The very first render is skipped so opening an existing invoice never
-  // immediately overwrites its saved GST just from loading the page — but editing line items
-  // afterward (even on an existing invoice) still recalculates it, same as on a new one.
-  const gstManuallySet = useRef(false);
+  // GST always tracks 18% of the bill amount, recalculated whenever line items change — any
+  // manual edit to the field is only temporary and gets overwritten on the next line item
+  // change, so it can never silently go stale. The very first render is skipped so opening an
+  // existing invoice never immediately overwrites its saved GST just from loading the page.
   const gstSkipFirstRun = useRef(!!initial);
   useEffect(() => {
     if (gstSkipFirstRun.current) {
       gstSkipFirstRun.current = false;
       return;
     }
-    if (gstManuallySet.current) return;
     setGstAmount(Math.round(billAmount * GST_RATE * 100) / 100);
   }, [billAmount]);
 
@@ -653,29 +650,17 @@ export default function SalesInvoiceForm({
           <div className="space-y-3">
             <label className="block">
               <span className="block text-xs font-medium text-slate-600 mb-1">
-                GST amount <span className="font-normal text-slate-400">(auto-calculated at 18%, editable)</span>
+                GST amount{" "}
+                <span className="font-normal text-slate-400">
+                  (auto-calculated at 18% — updates automatically when line items change)
+                </span>
               </span>
               <input
                 type="number"
                 value={gstAmount}
-                onChange={(e) => {
-                  gstManuallySet.current = true;
-                  setGstAmount(parseFloat(e.target.value) || 0);
-                }}
+                onChange={(e) => setGstAmount(parseFloat(e.target.value) || 0)}
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
-              {gstManuallySet.current && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    gstManuallySet.current = false;
-                    setGstAmount(Math.round(billAmount * GST_RATE * 100) / 100);
-                  }}
-                  className="text-xs text-brand hover:underline mt-1"
-                >
-                  Reset to auto (18%)
-                </button>
-              )}
             </label>
             <label className="block">
               <span className="block text-xs font-medium text-slate-600 mb-1">Reimbursements</span>
