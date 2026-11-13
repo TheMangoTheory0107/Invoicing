@@ -339,6 +339,11 @@ export interface LinkBackfillResult {
   matched: number; // total cells written
   invoicesMatched: number; // distinct invoices that matched at least one row
   error?: string;
+  // Diagnostics for the "0 matched" case — lets a human (or a follow-up debugging pass) see
+  // the actual link formats being compared without another round trip.
+  tabsScanned?: string[];
+  sampleSheetLinks?: string[];
+  sampleInvoiceLinks?: string[];
 }
 
 // A one-time catch-up run for invoices that existed before this sync was wired in. Reads each
@@ -433,7 +438,16 @@ export async function backfillLinksAcrossInvoices(params: {
       await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: requests.slice(i, i + CHUNK) } });
     }
 
-    return { ok: true, matched, invoicesMatched };
+    const diagnostics =
+      matched === 0
+        ? {
+            tabsScanned: tabs.map((t) => t.title),
+            sampleSheetLinks: Array.from(linkIndex.keys()).slice(0, 5),
+            sampleInvoiceLinks: invoices.flatMap((inv) => inv.links.map((l) => normalizeLink(l.link))).slice(0, 5),
+          }
+        : {};
+
+    return { ok: true, matched, invoicesMatched, ...diagnostics };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unexpected error backfilling links.";
     return { ok: false, matched: 0, invoicesMatched: 0, error: message };

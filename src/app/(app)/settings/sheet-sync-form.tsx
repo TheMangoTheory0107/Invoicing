@@ -28,7 +28,16 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
   const [driveTesting, setDriveTesting] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillResult, setBackfillResult] = useState<
-    | { ok: true; matched: number; invoicesMatched: number; invoicesChecked: number; invoicesWithLinks: number }
+    | {
+        ok: true;
+        matched: number;
+        invoicesMatched: number;
+        invoicesChecked: number;
+        invoicesWithLinks: number;
+        tabsScanned?: string[];
+        sampleSheetLinks?: string[];
+        sampleInvoiceLinks?: string[];
+      }
     | { ok: false; error: string }
     | null
   >(null);
@@ -100,7 +109,7 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
   async function onBackfill() {
     if (
       !confirm(
-        "This scans every monthly tab (Oct'25, Nov'26, etc.) for Link matches against every existing Sales/Commission invoice, and writes Bill No + that line item's amount wherever it finds one. Matching cells get highlighted yellow. Safe to re-run, but it does write to the live sheet now — continue?"
+        "This scans every monthly tab from April 2026 onward for Link matches against every existing Sales/Commission invoice, and writes Bill No + that line item's amount wherever it finds one. Matching cells get highlighted yellow. Safe to re-run, but it does write to the live sheet now — continue?"
       )
     ) {
       return;
@@ -371,11 +380,12 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
         <h3 className="text-sm font-semibold text-slate-800">Monthly sheet Bill No sync</h3>
         <p className="text-xs text-slate-500 mt-1">
           Every Sales/Commission invoice you save now also scans your monthly tracking tabs
-          (Oct&apos;25, Nov&apos;26, …) for rows whose <strong>Link</strong> matches one of the
-          invoice&apos;s line items, and writes that invoice&apos;s number — plus that line
-          item&apos;s own amount, not the invoice total — into the row&apos;s{" "}
-          <strong>Bill No</strong> column, highlighted yellow. A tab missing a Link or Bill No
-          column is skipped automatically (your team reshuffles those column sets most months).
+          named like a month and year (e.g. Apr&apos;26, May&apos;26) for rows whose{" "}
+          <strong>Link</strong> matches one of the invoice&apos;s line items, and writes that
+          invoice&apos;s number — plus that line item&apos;s own amount, not the invoice total —
+          into the row&apos;s <strong>Bill No</strong> column, highlighted yellow. Only tabs from
+          April 2026 onward are scanned. A tab missing a Link or Bill No column is skipped
+          automatically (your team reshuffles those column sets most months).
         </p>
         <div className="flex items-center gap-3 mt-3">
           <button
@@ -400,6 +410,13 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
               <>
                 Checked {backfillResult.invoicesChecked} invoices ({backfillResult.invoicesWithLinks} had links).
                 Matched {backfillResult.invoicesMatched} invoice(s), writing {backfillResult.matched} cell(s).
+                {backfillResult.matched === 0 && backfillResult.tabsScanned && (
+                  <div className="mt-2 text-xs text-emerald-800 space-y-1">
+                    <div>Tabs scanned: {backfillResult.tabsScanned.join(", ") || "(none qualified)"}</div>
+                    <div>Example links from the sheet: {backfillResult.sampleSheetLinks?.join(" | ") || "(none found)"}</div>
+                    <div>Example links from your invoices: {backfillResult.sampleInvoiceLinks?.join(" | ") || "(none found)"}</div>
+                  </div>
+                )}
               </>
             ) : (
               backfillResult.error
