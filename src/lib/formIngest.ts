@@ -3,7 +3,7 @@ import { getSettings } from "@/lib/settings";
 import { toNumber } from "@/lib/format";
 import { extractPurchaseBill, GeminiExtractError } from "@/lib/geminiExtract";
 import { detectPurchaseBillFileKind, mimeTypeForKind } from "@/lib/purchaseBillFileType";
-import { xlsxBufferToText, csvBufferToText } from "@/lib/purchaseBillTextExtract";
+import { xlsxBufferToText, csvBufferToText, docxBufferToText } from "@/lib/purchaseBillTextExtract";
 import { extractDriveFileId, downloadDriveFileAsUser, DriveSyncError } from "@/lib/googleDrive";
 import { getFormResponseSheet, colorSheetRow, writeStatusCell, SheetSyncError } from "@/lib/googleSheets";
 import { syncOriginalBillToDrive } from "@/lib/driveSync";
@@ -267,8 +267,22 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
       const extracted =
         detected.kind === "pdf"
           ? await extractPurchaseBill({ kind: "pdf", buffer: file.buffer }, settings.geminiApiKey, settings.geminiModel)
+          : detected.kind === "image"
+          ? await extractPurchaseBill(
+              { kind: "image", buffer: file.buffer, mimeType: file.mimeType },
+              settings.geminiApiKey,
+              settings.geminiModel
+            )
           : await extractPurchaseBill(
-              { kind: "text", content: detected.kind === "xlsx" ? await xlsxBufferToText(file.buffer) : csvBufferToText(file.buffer) },
+              {
+                kind: "text",
+                content:
+                  detected.kind === "xlsx"
+                    ? await xlsxBufferToText(file.buffer)
+                    : detected.kind === "docx"
+                    ? await docxBufferToText(file.buffer)
+                    : csvBufferToText(file.buffer),
+              },
               settings.geminiApiKey,
               settings.geminiModel
             );
@@ -335,8 +349,8 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
         number: invoice.number,
         partyName: creator.name,
         fileBuffer: file.buffer,
-        mimeType: mimeTypeForKind(detected.kind),
-        fileExt: detected.kind,
+        mimeType: mimeTypeForKind(detected.kind, file.mimeType),
+        fileExt: file.name.split(".").pop()?.toLowerCase() || detected.kind,
       });
       if (driveResult.link) {
         await prisma.invoice.update({ where: { id: invoice.id }, data: { pdfPath: driveResult.link } });

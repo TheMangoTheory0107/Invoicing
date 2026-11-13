@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSettings } from "@/lib/settings";
 import { extractPurchaseBill, GeminiExtractError } from "@/lib/geminiExtract";
 import { detectPurchaseBillFileKind } from "@/lib/purchaseBillFileType";
-import { xlsxBufferToText, csvBufferToText } from "@/lib/purchaseBillTextExtract";
+import { xlsxBufferToText, csvBufferToText, docxBufferToText } from "@/lib/purchaseBillTextExtract";
 
 // Gemini can take a while on a PDF, especially on a newly-released model under heavy load —
 // give it more room than Vercel's short default function timeout so a slow-but-successful
@@ -37,8 +37,15 @@ export async function POST(req: NextRequest) {
     let extracted;
     if (detected.kind === "pdf") {
       extracted = await extractPurchaseBill({ kind: "pdf", buffer }, settings.geminiApiKey, settings.geminiModel);
+    } else if (detected.kind === "image") {
+      extracted = await extractPurchaseBill(
+        { kind: "image", buffer, mimeType: file.type || "image/jpeg" },
+        settings.geminiApiKey,
+        settings.geminiModel
+      );
     } else {
-      const content = detected.kind === "xlsx" ? await xlsxBufferToText(buffer) : csvBufferToText(buffer);
+      const content =
+        detected.kind === "xlsx" ? await xlsxBufferToText(buffer) : detected.kind === "docx" ? await docxBufferToText(buffer) : csvBufferToText(buffer);
       if (!content.trim()) {
         return NextResponse.json({ error: "That file appears to be empty." }, { status: 400 });
       }

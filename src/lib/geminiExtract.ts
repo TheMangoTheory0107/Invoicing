@@ -68,6 +68,7 @@ const PROMPT = `This document is a tax invoice/bill sent to us by a vendor (a co
 
 export type PurchaseBillSource =
   | { kind: "pdf"; buffer: Buffer }
+  | { kind: "image"; buffer: Buffer; mimeType: string }
   | { kind: "text"; content: string };
 
 // Google has repeatedly retired model IDs out from under this app (gemini-2.5-flash, then
@@ -139,9 +140,14 @@ export async function extractPurchaseBill(
           { text: PROMPT },
           { inline_data: { mime_type: "application/pdf", data: source.buffer.toString("base64") } },
         ]
+      : source.kind === "image"
+      ? [
+          { text: PROMPT },
+          { inline_data: { mime_type: source.mimeType, data: source.buffer.toString("base64") } },
+        ]
       : [
           {
-            text: `${PROMPT}\n\nHere is the bill's content, as plain text extracted from a spreadsheet/CSV file:\n\n${source.content}`,
+            text: `${PROMPT}\n\nHere is the bill's content, as plain text extracted from a spreadsheet/CSV/Word file:\n\n${source.content}`,
           },
         ];
 

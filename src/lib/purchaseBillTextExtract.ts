@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import mammoth from "mammoth";
 
 // Flattens every sheet of an uploaded vendor bill workbook into plain text — good enough for
 // Gemini to read the numbers off, without needing a mime type it can treat as a document.
@@ -37,4 +38,11 @@ function cellToString(value: ExcelJS.CellValue): string {
 
 export function csvBufferToText(buffer: Buffer): string {
   return buffer.toString("utf-8");
+}
+
+// Creators sometimes send their invoice as a Word document rather than a PDF — plain text is
+// good enough for Gemini to read the numbers off, same as the spreadsheet path.
+export async function docxBufferToText(buffer: Buffer): Promise<string> {
+  const result = await mammoth.extractRawText({ buffer });
+  return result.value;
 }

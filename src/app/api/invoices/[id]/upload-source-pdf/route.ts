@@ -35,8 +35,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     number: invoice.number,
     partyName: invoice.creator?.name || "Unknown",
     fileBuffer: buffer,
-    mimeType: mimeTypeForKind(detected.kind),
-    fileExt: detected.kind,
+    mimeType: mimeTypeForKind(detected.kind, file.type),
+    fileExt: file.name.split(".").pop()?.toLowerCase() || detected.kind,
   });
 
   if (driveSyncResult.link) {
