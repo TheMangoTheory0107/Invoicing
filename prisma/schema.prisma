@@ -71,6 +71,10 @@ model Party {
   ifsc        String?
   upiId       String?
   notes       String?
+  // Set once this creator has been added as a payee/beneficiary in the bank — lets the "new
+  // Purchase bill" payee-reminder email stop sending for them once they've actually been added,
+  // without needing to track it anywhere else.
+  payeeAdded  Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

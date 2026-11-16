@@ -8,6 +8,9 @@ import { syncInvoiceToDrive, deleteInvoiceDriveFile } from "@/lib/driveSync";
 import { syncLineItemLinksToMonthlySheets, type LinkSyncResult } from "@/lib/googleSheets";
 import { renderInvoicePdf } from "@/lib/pdf/generate";
 import { toNumber } from "@/lib/format";
+import { sendPlainEmail } from "@/lib/email";
+import { signPayeeToken } from "@/lib/payeeConfirm";
+import { appBaseUrl } from "@/lib/appUrl";
 import type { SalesInvoiceInput, PurchaseInvoiceInput } from "@/lib/validation";
 
 type InvoiceWithRelationsForPdf = Awaited<ReturnType<typeof fetchInvoiceForPdf>>;
@@ -323,7 +326,47 @@ export async function createPurchaseInvoice(
     },
   });
 
-  return finalize(invoice.id);
+  const result = await finalize(invoice.id);
+  await sendPayeeReminderIfNeeded(result.invoice, settings);
+  return result;
+}
+
+// A new Purchase bill means someone new (or someone not yet set up) needs paying — nudges the
+// business owner to add that creator as a payee/beneficiary in the bank, with the bank details
+// right there in the email, plus a one-click link to stop the reminder once it's actually done.
+// Never blocks invoice creation: email failures are swallowed, same as every other notification
+// in this app.
+async function sendPayeeReminderIfNeeded(
+  invoice: { id: string; number: string; creator: { id: string; name: string; payeeAdded: boolean; bankAccName: string | null; bankName: string | null; bankAccNo: string | null; ifsc: string | null; upiId: string | null } | null },
+  settings: { emailFromAddress: string; emailAppPassword: string; companyName: string }
+) {
+  if (!invoice.creator || invoice.creator.payeeAdded) return;
+  if (!settings.emailFromAddress || !settings.emailAppPassword) return;
+
+  const creator = invoice.creator;
+  const base = appBaseUrl();
+  const token = signPayeeToken(creator.id);
+  const bankLines = [
+    creator.bankAccName && `Account Holder: ${creator.bankAccName}`,
+    creator.bankName && `Bank: ${creator.bankName}`,
+    creator.bankAccNo && `Account No: ${creator.bankAccNo}`,
+    creator.ifsc && `IFSC: ${creator.ifsc}`,
+    creator.upiId && `UPI ID: ${creator.upiId}`,
+  ].filter(Boolean);
+
+  await sendPlainEmail({
+    fromAddress: settings.emailFromAddress,
+    appPassword: settings.emailAppPassword,
+    fromName: settings.companyName,
+    to: settings.emailFromAddress,
+    subject: `Add ${creator.name} as a payee — new Purchase bill ${invoice.number}`,
+    html: `
+      <p>A new Purchase bill was created for <strong>${creator.name}</strong> (${invoice.number}).</p>
+      ${bankLines.length ? `<p>Bank details to add them as a payee:</p><ul>${bankLines.map((l) => `<li>${l}</li>`).join("")}</ul>` : "<p>No bank details on file for them yet — check the party record.</p>"}
+      <p><a href="${base}/invoices/purchase/${invoice.id}">View the invoice</a></p>
+      <p><a href="${base}/payee-confirm?party=${creator.id}&token=${token}">Mark ${creator.name} as added — stop this reminder for them</a></p>
+    `,
+  }).catch(() => {});
 }
 
 export async function updatePurchaseInvoice(id: string, input: PurchaseInvoiceInput) {
