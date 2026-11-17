@@ -37,6 +37,9 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
         tabsScanned?: string[];
         sampleSheetLinks?: string[];
         sampleInvoiceLinks?: string[];
+        allTabTitles?: string[];
+        inScopeTabTitles?: string[];
+        inScopeTabsMissingHeaders?: { title: string; headers: string[] }[];
       }
     | { ok: false; error: string }
     | null
@@ -415,6 +418,17 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
                     <div>Tabs scanned: {backfillResult.tabsScanned.join(", ") || "(none qualified)"}</div>
                     <div>Example links from the sheet: {backfillResult.sampleSheetLinks?.join(" | ") || "(none found)"}</div>
                     <div>Example links from your invoices: {backfillResult.sampleInvoiceLinks?.join(" | ") || "(none found)"}</div>
+                    {backfillResult.allTabTitles && (
+                      <>
+                        <div>All tabs the service account can see: {backfillResult.allTabTitles.join(", ") || "(none — check sharing/spreadsheet ID)"}</div>
+                        <div>Of those, in the Apr 2026+ scan window: {backfillResult.inScopeTabTitles?.join(", ") || "(none)"}</div>
+                        {backfillResult.inScopeTabsMissingHeaders?.map((t) => (
+                          <div key={t.title}>
+                            &quot;{t.title}&quot; is missing Link/Bill No — its actual headers: {t.headers.join(" | ") || "(empty row 1)"}
+                          </div>
+                        ))}
+                      </>
+                    )}
                   </div>
                 )}
               </>

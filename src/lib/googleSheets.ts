@@ -344,6 +344,41 @@ export interface LinkBackfillResult {
   tabsScanned?: string[];
   sampleSheetLinks?: string[];
   sampleInvoiceLinks?: string[];
+  // Deeper diagnosis of why tabsScanned came up empty — every tab title the service account
+  // can actually see, which of those fall in the April-2026+ scan window, and for any in-window
+  // tab that still didn't qualify, its actual header row (so a renamed/missing Link or Bill No
+  // column is visible directly, instead of just "didn't qualify").
+  allTabTitles?: string[];
+  inScopeTabTitles?: string[];
+  inScopeTabsMissingHeaders?: { title: string; headers: string[] }[];
+}
+
+// Diagnoses why findLinkTrackingTabs came up with nothing — same scope/header checks, but
+// reporting every step instead of silently dropping anything that doesn't qualify.
+async function diagnoseLinkTrackingTabs(
+  serviceAccountJson: string,
+  spreadsheetId: string
+): Promise<{
+  allTitles: string[];
+  inScopeTitles: string[];
+  inScopeMissingHeaders: { title: string; headers: string[] }[];
+}> {
+  const sheets = getSheetsClient(serviceAccountJson);
+  const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets.properties" });
+  const allTitles = (meta.data.sheets || []).map((s) => s.properties?.title || "").filter(Boolean);
+  const inScope = (meta.data.sheets || [])
+    .map((s) => ({ sheetId: s.properties?.sheetId, title: s.properties?.title }))
+    .filter((t): t is { sheetId: number; title: string } => t.sheetId != null && !!t.title && tabInScope(t.title));
+
+  const norm = (s: string) => s.trim().toLowerCase();
+  const inScopeMissingHeaders: { title: string; headers: string[] }[] = [];
+  for (const tab of inScope) {
+    const headers = await getHeaderRow(sheets, spreadsheetId, tab.title);
+    const hasLink = headers.some((h) => norm(h) === "link");
+    const hasBillNo = headers.some((h) => norm(h) === "bill no");
+    if (!hasLink || !hasBillNo) inScopeMissingHeaders.push({ title: tab.title, headers });
+  }
+  return { allTitles, inScopeTitles: inScope.map((t) => t.title), inScopeMissingHeaders };
 }
 
 // A one-time catch-up run for invoices that existed before this sync was wired in. Reads each
@@ -438,14 +473,20 @@ export async function backfillLinksAcrossInvoices(params: {
       await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests: requests.slice(i, i + CHUNK) } });
     }
 
-    const diagnostics =
-      matched === 0
-        ? {
-            tabsScanned: tabs.map((t) => t.title),
-            sampleSheetLinks: Array.from(linkIndex.keys()).slice(0, 5),
-            sampleInvoiceLinks: invoices.flatMap((inv) => inv.links.map((l) => normalizeLink(l.link))).slice(0, 5),
-          }
-        : {};
+    let diagnostics: Partial<LinkBackfillResult> = {};
+    if (matched === 0) {
+      diagnostics = {
+        tabsScanned: tabs.map((t) => t.title),
+        sampleSheetLinks: Array.from(linkIndex.keys()).slice(0, 5),
+        sampleInvoiceLinks: invoices.flatMap((inv) => inv.links.map((l) => normalizeLink(l.link))).slice(0, 5),
+      };
+      if (tabs.length === 0) {
+        const deep = await diagnoseLinkTrackingTabs(serviceAccountJson, spreadsheetId);
+        diagnostics.allTabTitles = deep.allTitles;
+        diagnostics.inScopeTabTitles = deep.inScopeTitles;
+        diagnostics.inScopeTabsMissingHeaders = deep.inScopeMissingHeaders;
+      }
+    }
 
     return { ok: true, matched, invoicesMatched, ...diagnostics };
   } catch (err) {
