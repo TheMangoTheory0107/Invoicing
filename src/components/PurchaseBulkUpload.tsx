@@ -3,8 +3,9 @@
 import { useState } from "react";
 import Link from "next/link";
 import { detectPurchaseBillFileKind, PURCHASE_BILL_ACCEPT } from "@/lib/purchaseBillFileType";
+import type { ExtractedPurchaseBill } from "@/lib/geminiExtract";
 
-type FileStatus = "pending" | "reading" | "saving" | "done" | "error" | "duplicate";
+type FileStatus = "pending" | "reading" | "saving" | "done" | "error" | "duplicate" | "replacing";
 
 interface FileEntry {
   key: string;
@@ -14,6 +15,31 @@ interface FileEntry {
   invoiceId?: string;
   vendorName?: string;
   amount?: number;
+  // Only set when status is "duplicate" — everything needed to replace the existing invoice
+  // with this upload instead, without re-reading the file or calling Gemini again.
+  pendingReplace?: { file: File; creatorId: string; extracted: ExtractedPurchaseBill };
+}
+
+function buildLineItems(extracted: ExtractedPurchaseBill) {
+  return extracted.lineItems?.length
+    ? extracted.lineItems.map((li) => ({
+        description: li.description || "",
+        link1: "",
+        link2: "",
+        qty: li.qty || 1,
+        rate: li.rate || li.amount || 0,
+        amount: li.amount || 0,
+      }))
+    : [
+        {
+          description: "Bill",
+          link1: "",
+          link2: "",
+          qty: 1,
+          rate: extracted.billAmount || 0,
+          amount: extracted.billAmount || 0,
+        },
+      ];
 }
 
 async function processOne(file: File, update: (patch: Partial<FileEntry>) => void) {
@@ -36,6 +62,9 @@ async function processOne(file: File, update: (patch: Partial<FileEntry>) => voi
       status: "duplicate",
       invoiceId: possibleDuplicate.id,
       message: `Already recorded as ${possibleDuplicate.number} (their #${possibleDuplicate.vendorInvoiceNumber}) — not saved again.`,
+      // possibleDuplicate is only ever set once a creator has already been matched, so
+      // matchedCreatorId is guaranteed here — nothing left to resolve if this gets replaced.
+      pendingReplace: { file, creatorId: matchedCreatorId, extracted },
     });
     return;
   }
@@ -72,26 +101,6 @@ async function processOne(file: File, update: (patch: Partial<FileEntry>) => voi
 
   update({ status: "saving" });
 
-  const lineItems = extracted.lineItems?.length
-    ? extracted.lineItems.map((li: { description: string; qty: number; rate: number; amount: number }) => ({
-        description: li.description || "",
-        link1: "",
-        link2: "",
-        qty: li.qty || 1,
-        rate: li.rate || li.amount || 0,
-        amount: li.amount || 0,
-      }))
-    : [
-        {
-          description: "Bill",
-          link1: "",
-          link2: "",
-          qty: 1,
-          rate: extracted.billAmount || 0,
-          amount: extracted.billAmount || 0,
-        },
-      ];
-
   const createInvoiceRes = await fetch("/api/invoices/purchase", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -102,7 +111,7 @@ async function processOne(file: File, update: (patch: Partial<FileEntry>) => voi
       billAmount: extracted.billAmount || 0,
       gstAmount: extracted.gstAmount || 0,
       reimbursements: 0,
-      lineItems,
+      lineItems: buildLineItems(extracted),
       termsAndConditions: "",
       notes: "",
       vendorInvoiceNumber: extracted.invoiceNumber || "",
@@ -163,6 +172,45 @@ export default function PurchaseBulkUpload() {
     setProcessing(false);
   }
 
+  async function replaceExisting(key: string) {
+    const entry = files.find((f) => f.key === key);
+    if (!entry?.pendingReplace || !entry.invoiceId) return;
+    const { file, creatorId, extracted } = entry.pendingReplace;
+    const invoiceId = entry.invoiceId;
+    const update = (patch: Partial<FileEntry>) => setFiles((prev) => prev.map((f) => (f.key === key ? { ...f, ...patch } : f)));
+
+    update({ status: "replacing" });
+    const putRes = await fetch(`/api/invoices/${invoiceId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        creatorId,
+        date: extracted.invoiceDate || new Date().toISOString().slice(0, 10),
+        dueDate: extracted.dueDate || null,
+        billAmount: extracted.billAmount || 0,
+        gstAmount: extracted.gstAmount || 0,
+        reimbursements: 0,
+        lineItems: buildLineItems(extracted),
+        termsAndConditions: "",
+        notes: "",
+        vendorInvoiceNumber: extracted.invoiceNumber || "",
+        hasSourcePdf: true,
+      }),
+    });
+    if (!putRes.ok) {
+      const data = await putRes.json().catch(() => ({}));
+      const errMsg = typeof data.error === "string" ? data.error : data.error?.formErrors?.[0] || "Could not replace the existing bill.";
+      update({ status: "error", message: errMsg });
+      return;
+    }
+
+    const sourceForm = new FormData();
+    sourceForm.append("file", file);
+    await fetch(`/api/invoices/${invoiceId}/upload-source-pdf`, { method: "POST", body: sourceForm });
+
+    update({ status: "done", message: undefined });
+  }
+
   return (
     <div>
       <div
@@ -216,7 +264,9 @@ export default function PurchaseBulkUpload() {
                 <div className="shrink-0">
                   {f.status === "pending" && <span className="text-xs text-slate-400">Waiting…</span>}
                   {f.status === "reading" && <span className="text-xs text-amber-600">Reading…</span>}
-                  {f.status === "saving" && <span className="text-xs text-amber-600">Saving…</span>}
+                  {(f.status === "saving" || f.status === "replacing") && (
+                    <span className="text-xs text-amber-600">{f.status === "replacing" ? "Replacing…" : "Saving…"}</span>
+                  )}
                   {f.status === "done" && (
                     <Link href={`/invoices/purchase/${f.invoiceId}`} className="text-xs text-emerald-700 font-medium hover:underline">
                       Saved — view
@@ -224,9 +274,18 @@ export default function PurchaseBulkUpload() {
                   )}
                   {f.status === "error" && <span className="text-xs text-red-600 font-medium">Failed</span>}
                   {f.status === "duplicate" && (
-                    <Link href={`/invoices/purchase/${f.invoiceId}`} className="text-xs text-amber-700 font-medium hover:underline">
-                      Possible duplicate — view existing
-                    </Link>
+                    <div className="flex items-center gap-3">
+                      <Link href={`/invoices/purchase/${f.invoiceId}`} className="text-xs text-amber-700 font-medium hover:underline">
+                        View existing
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => replaceExisting(f.key)}
+                        className="text-xs text-red-700 font-medium hover:underline"
+                      >
+                        Replace it with this one
+                      </button>
+                    </div>
                   )}
                 </div>
               </li>
