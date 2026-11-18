@@ -75,6 +75,12 @@ model Party {
   // Purchase bill" payee-reminder email stop sending for them once they've actually been added,
   // without needing to track it anywhere else.
   payeeAdded  Boolean  @default(false)
+  // This creator's own payment terms (days after the bill date their due date falls),
+  // overriding the global Purchase default in Settings — e.g. 0 for paid in advance, or 10/30/
+  // 45/60 for creators with their own agreed terms. Null means "use the global default."
+  // Only meaningful for CREATOR-type parties, used whenever a Purchase bill is created for them
+  // without an explicit due date (manual entry, bulk upload, or the form-ingest auto-create).
+  defaultPaymentTermsDays Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

@@ -43,6 +43,7 @@ export default function PartyForm({
     ifsc: party?.ifsc || "",
     upiId: party?.upiId || "",
     notes: party?.notes || "",
+    defaultPaymentTermsDays: party?.defaultPaymentTermsDays != null ? String(party.defaultPaymentTermsDays) : "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +60,13 @@ export default function PartyForm({
     const res = await fetch(url, {
       method: party ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...form, type }),
+      // Sent as an explicit null when cleared, not an empty string — the API's number coercion
+      // would otherwise turn "" into 0 ("advance"), indistinguishable from an actual 0.
+      body: JSON.stringify({
+        ...form,
+        type,
+        defaultPaymentTermsDays: form.defaultPaymentTermsDays === "" ? null : Number(form.defaultPaymentTermsDays),
+      }),
     });
     setSaving(false);
     if (!res.ok) {
@@ -132,6 +139,27 @@ export default function PartyForm({
             <Field label="UPI ID" value={form.upiId} onChange={(e) => set("upiId", e.target.value)} />
           </div>
         </div>
+      )}
+
+      {isCreator && (
+        <label className="block max-w-xs">
+          <span className="block text-xs font-medium text-slate-600 mb-1">
+            Payment terms (days after bill date){" "}
+            <span className="font-normal text-slate-400">— 0 for advance/immediate, blank for the Settings default</span>
+          </span>
+          <input
+            type="number"
+            min={0}
+            value={form.defaultPaymentTermsDays}
+            onChange={(e) => set("defaultPaymentTermsDays", e.target.value)}
+            placeholder="e.g. 10, 30, 45, 60"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+          <span className="block text-xs text-slate-400 mt-1">
+            Applied automatically to every new Purchase bill for this creator — manual entries, bulk
+            uploads, and form submissions — unless a due date is typed in by hand.
+          </span>
+        </label>
       )}
 
       <label className="block">

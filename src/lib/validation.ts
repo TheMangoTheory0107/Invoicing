@@ -15,6 +15,7 @@ export const partySchema = z.object({
   ifsc: z.string().optional().default(""),
   upiId: z.string().optional().default(""),
   notes: z.string().optional().default(""),
+  defaultPaymentTermsDays: z.coerce.number().int().min(0).optional().nullable(),
 });
 
 export type PartyInput = z.infer<typeof partySchema>;

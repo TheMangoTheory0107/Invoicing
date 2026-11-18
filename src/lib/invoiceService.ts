@@ -299,7 +299,18 @@ export async function createPurchaseInvoice(
   const fy = financialYearFor(date);
   const month = monthLabel(date);
   const settings = await getSettings();
-  const dueDate = input.dueDate ? parseDateOnly(input.dueDate) : addDays(date, settings.purchasePaymentTermsDays);
+  // A creator's own agreed payment terms (set on their party record) win over the global
+  // Purchase default — but an explicit due date passed in (typed by hand, or extracted from the
+  // bill itself) always wins over both.
+  let termsDays = settings.purchasePaymentTermsDays;
+  if (!input.dueDate) {
+    const creatorForTerms = await prisma.party.findUnique({
+      where: { id: input.creatorId },
+      select: { defaultPaymentTermsDays: true },
+    });
+    if (creatorForTerms?.defaultPaymentTermsDays != null) termsDays = creatorForTerms.defaultPaymentTermsDays;
+  }
+  const dueDate = input.dueDate ? parseDateOnly(input.dueDate) : addDays(date, termsDays);
 
   const totalAmount = input.billAmount + input.gstAmount + input.reimbursements;
   const number = await allocateInvoiceNumber("PURCHASE", fy);

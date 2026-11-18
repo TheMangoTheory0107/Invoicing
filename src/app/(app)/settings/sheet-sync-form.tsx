@@ -406,15 +406,20 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
         {backfillResult && (
           <div
             className={`rounded-md px-3 py-2 text-sm mt-2 ${
-              backfillResult.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+              !backfillResult.ok
+                ? "bg-red-50 text-red-700"
+                : backfillResult.matched === 0
+                ? "bg-amber-50 text-amber-800"
+                : "bg-emerald-50 text-emerald-700"
             }`}
           >
             {backfillResult.ok ? (
               <>
+                {backfillResult.matched === 0 && <strong>Nothing matched — </strong>}
                 Checked {backfillResult.invoicesChecked} invoices ({backfillResult.invoicesWithLinks} had links).
                 Matched {backfillResult.invoicesMatched} invoice(s), writing {backfillResult.matched} cell(s).
                 {backfillResult.matched === 0 && backfillResult.tabsScanned && (
-                  <div className="mt-2 text-xs text-emerald-800 space-y-1">
+                  <div className="mt-2 text-xs space-y-1">
                     <div>Tabs scanned: {backfillResult.tabsScanned.join(", ") || "(none qualified)"}</div>
                     <div>Example links from the sheet: {backfillResult.sampleSheetLinks?.join(" | ") || "(none found)"}</div>
                     <div>Example links from your invoices: {backfillResult.sampleInvoiceLinks?.join(" | ") || "(none found)"}</div>
