@@ -15,6 +15,7 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     formResponsesSpreadsheetId: config.formResponsesSpreadsheetId,
     formResponsesSheetName: config.formResponsesSheetName,
     formResponsesImpersonate: config.formResponsesImpersonate,
+    monthlyTrackingSpreadsheetId: config.monthlyTrackingSpreadsheetId,
   });
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -383,18 +384,32 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
         <h3 className="text-sm font-semibold text-slate-800">Monthly sheet Bill No sync</h3>
         <p className="text-xs text-slate-500 mt-1">
           Every Sales/Commission invoice you save now also scans your monthly tracking tabs
-          named like a month and year (e.g. Apr&apos;26, May&apos;26) for rows whose{" "}
+          named like a month and year (e.g. Apr&apos;26, May&apos;26) — in a separate internal
+          execution-tracking spreadsheet, not the Register workbook above — for rows whose{" "}
           <strong>Link</strong> matches one of the invoice&apos;s line items, and writes that
           invoice&apos;s number — plus that line item&apos;s own amount, not the invoice total —
           into the row&apos;s <strong>Bill No</strong> column, highlighted yellow. Only tabs from
           April 2026 onward are scanned. A tab missing a Link or Bill No column is skipped
           automatically (your team reshuffles those column sets most months).
         </p>
+        <label className="block max-w-md mt-3">
+          <span className="block text-xs font-medium text-slate-600 mb-1">
+            Monthly tracking spreadsheet ID{" "}
+            <span className="font-normal text-slate-400">— must also be shared (Editor) with the service account above</span>
+          </span>
+          <input
+            type="text"
+            value={form.monthlyTrackingSpreadsheetId}
+            onChange={(e) => set("monthlyTrackingSpreadsheetId", e.target.value)}
+            placeholder="The spreadsheet ID from its URL"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </label>
         <div className="flex items-center gap-3 mt-3">
           <button
             type="button"
             onClick={onBackfill}
-            disabled={backfilling || !form.spreadsheetId || !form.serviceAccountJson}
+            disabled={backfilling || !form.monthlyTrackingSpreadsheetId || !form.serviceAccountJson}
             className="rounded-md border border-slate-300 text-sm font-medium px-4 py-2 hover:bg-slate-50 disabled:opacity-60"
           >
             {backfilling ? "Running…" : "Backfill already-raised invoices"}

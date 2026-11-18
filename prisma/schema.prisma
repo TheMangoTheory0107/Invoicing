@@ -259,6 +259,12 @@ model SheetSyncConfig {
   // The mailbox the service account impersonates via domain-wide delegation to read the
   // uploaded "Invoice Copy" files — same impersonated address already used for Gmail sending.
   formResponsesImpersonate   String @default("")
+  // The internal execution-tracking spreadsheet with the monthly tabs (Apr'26, May'26, ...) —
+  // a third, separate spreadsheet from both `spreadsheetId` (the Sales/Commission/Purchase
+  // Register workbook) and `formResponsesSpreadsheetId` (the creator submission form). The
+  // "Monthly sheet Bill No sync" feature reads/writes this one specifically. Needs sharing
+  // (Editor) with the same service account.
+  monthlyTrackingSpreadsheetId String @default("")
 }
 
 model User {

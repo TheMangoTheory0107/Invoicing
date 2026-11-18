@@ -143,9 +143,11 @@ async function finalize(invoiceId: string) {
   const driveConfig = await prisma.sheetSyncConfig.findUnique({ where: { id: 1 } });
 
   // Sales/Commission line items carry the creator content links the monthly tracking sheets
-  // key off of — Purchase bills don't have this concept, so they're skipped entirely.
+  // key off of — Purchase bills don't have this concept, so they're skipped entirely. The
+  // monthly tabs live in a separate internal execution-tracking spreadsheet, not the
+  // Sales/Commission/Purchase Register workbook `spreadsheetId` points at.
   let linkSyncResult: LinkSyncResult = { attempted: false, ok: true, matched: 0 };
-  if (invoice.type !== "PURCHASE" && driveConfig?.spreadsheetId && driveConfig.serviceAccountJson) {
+  if (invoice.type !== "PURCHASE" && driveConfig?.monthlyTrackingSpreadsheetId && driveConfig.serviceAccountJson) {
     const byLink = new Map<string, number>();
     for (const li of invoice.lineItems) {
       const amount = toNumber(li.amount);
@@ -155,7 +157,7 @@ async function finalize(invoiceId: string) {
     if (byLink.size > 0) {
       linkSyncResult = await syncLineItemLinksToMonthlySheets({
         serviceAccountJson: driveConfig.serviceAccountJson,
-        spreadsheetId: driveConfig.spreadsheetId,
+        spreadsheetId: driveConfig.monthlyTrackingSpreadsheetId,
         invoiceNumber: invoice.number,
         links: Array.from(byLink, ([link, amount]) => ({ link, amount })),
       });

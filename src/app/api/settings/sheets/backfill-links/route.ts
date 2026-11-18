@@ -14,9 +14,12 @@ export const maxDuration = 60;
 // just get rewritten with the same value.
 export async function POST() {
   const config = await prisma.sheetSyncConfig.findUnique({ where: { id: 1 } });
-  if (!config?.spreadsheetId || !config.serviceAccountJson) {
+  if (!config?.monthlyTrackingSpreadsheetId || !config.serviceAccountJson) {
     return NextResponse.json(
-      { error: "Set up the spreadsheet ID and service account in Settings → Google Sheets & Drive sync first." },
+      {
+        error:
+          "Set up the monthly tracking spreadsheet ID and service account in Settings → Google Sheets & Drive sync first.",
+      },
       { status: 400 }
     );
   }
@@ -42,7 +45,7 @@ export async function POST() {
   try {
     const result = await backfillLinksAcrossInvoices({
       serviceAccountJson: config.serviceAccountJson,
-      spreadsheetId: config.spreadsheetId,
+      spreadsheetId: config.monthlyTrackingSpreadsheetId,
       invoices: invoiceLinks,
     });
     return NextResponse.json({
