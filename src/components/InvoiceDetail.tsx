@@ -42,6 +42,30 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
     Math.max(0, data.totalAmount - data.amountPaid - data.tdsDeducted) || ""
   );
   const [payTdsPct, setPayTdsPct] = useState<number | "">("");
+  const [retryUploading, setRetryUploading] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+
+  async function onRetryDriveUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // lets picking the same filename again re-trigger onChange
+    if (!file) return;
+    setRetryUploading(true);
+    setRetryError(null);
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`/api/invoices/${data.id}/upload-source-pdf`, { method: "POST", body: form });
+    setRetryUploading(false);
+    if (!res.ok) {
+      setRetryError("Could not file this to Drive — check the Drive folder/sharing in Settings and try again.");
+      return;
+    }
+    const resData = await res.json();
+    if (!resData.driveSyncResult?.ok) {
+      setRetryError(resData.driveSyncResult?.error || "Drive sync didn't confirm success — check Settings and try again.");
+      return;
+    }
+    router.refresh();
+  }
   const payTdsAmount = Math.round((data.billAmount * (Number(payTdsPct) || 0)) / 100 * 100) / 100;
   const [payMethod, setPayMethod] = useState("");
   const [payReference, setPayReference] = useState("");
@@ -203,6 +227,14 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
               {data.type === "PURCHASE" ? "Internal record (PDF)" : "Download PDF"}
             </a>
           )}
+          {/* The bill was read and the invoice created, but filing the original to Drive
+              never succeeded — this invoice otherwise has no way to view or retry it. */}
+          {data.type === "PURCHASE" && data.hasSourcePdf && !data.pdfPath && (
+            <label className="rounded-md border border-amber-300 bg-amber-50 text-amber-800 text-sm px-3 py-1.5 hover:brightness-95 font-medium cursor-pointer">
+              {retryUploading ? "Uploading…" : "Drive filing failed — upload again"}
+              <input type="file" className="hidden" disabled={retryUploading} onChange={onRetryDriveUpload} />
+            </label>
+          )}
           <Link
             href={`${listHref}/${data.id}/edit`}
             className="rounded-md border border-slate-300 text-sm px-3 py-1.5 hover:bg-slate-50"
@@ -235,6 +267,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
           </button>
         </div>
       </div>
+      {retryError && <p className="text-sm text-red-600 -mt-4">{retryError}</p>}
 
       {data.type !== "PURCHASE" && (
         <form

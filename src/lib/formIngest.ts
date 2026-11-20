@@ -166,7 +166,11 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
         columnCount: sheet.headers.length,
         color: "green",
       }).catch(() => {});
-      if (row.values[STATUS_COL]?.trim()) {
+      // Only clears a genuine failure note (from a prior attempt that's now resolved) — never
+      // an informational "created, but Drive filing failed" note, which stays relevant for an
+      // invoice that already exists and won't be re-attempted.
+      const existingNote = row.values[STATUS_COL]?.trim();
+      if (existingNote && !existingNote.startsWith("Created ")) {
         await writeStatusCell({
           serviceAccountJson: config.serviceAccountJson,
           spreadsheetId: config.formResponsesSpreadsheetId,
@@ -355,6 +359,22 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
       if (driveResult.link) {
         await prisma.invoice.update({ where: { id: invoice.id }, data: { pdfPath: driveResult.link } });
       }
+      // A real Drive failure here (not just "not configured") used to be completely silent —
+      // the invoice still gets created and the row still turns green (that's the actual
+      // success that matters), but the original file never gets filed and there was no sign of
+      // it anywhere. Recorded as an informational note, not a flag: it doesn't block future
+      // runs from skipping this row, since the invoice already exists and shouldn't be redone.
+      const driveFailed = driveResult.attempted && !driveResult.ok;
+      if (driveFailed) {
+        await writeStatusCell({
+          serviceAccountJson: config.serviceAccountJson,
+          spreadsheetId: config.formResponsesSpreadsheetId,
+          sheetName,
+          rowIndex: row.rowIndex,
+          columnIndex: STATUS_COL,
+          value: `Created ${invoice.number}, but filing to Drive failed: ${driveResult.error || "unknown error"}`,
+        }).catch(() => {});
+      }
 
       await colorSheetRow({
         serviceAccountJson: config.serviceAccountJson,
@@ -372,7 +392,7 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
           fromName: settings.companyName,
           to: settings.emailFromAddress,
           subject: `New Purchase bill auto-added: ${invoice.number} — ${creator.name}`,
-          html: `<p>A new Purchase bill was auto-created from a form submission.</p><p><strong>${creator.name}</strong> — ${invoice.number} — ₹${toNumber(invoice.totalAmount).toLocaleString("en-IN")}</p>`,
+          html: `<p>A new Purchase bill was auto-created from a form submission.</p><p><strong>${creator.name}</strong> — ${invoice.number} — ₹${toNumber(invoice.totalAmount).toLocaleString("en-IN")}</p>${driveFailed ? `<p style="color:#b45309">The original file could not be filed to Drive: ${driveResult.error || "unknown error"}. Re-upload it from the invoice page.</p>` : ""}`,
         }).catch(() => {});
       }
 
