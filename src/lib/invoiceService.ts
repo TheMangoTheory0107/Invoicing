@@ -147,7 +147,7 @@ async function finalize(invoiceId: string) {
   // monthly tabs live in a separate internal execution-tracking spreadsheet, not the
   // Sales/Commission/Purchase Register workbook `spreadsheetId` points at.
   let linkSyncResult: LinkSyncResult = { attempted: false, ok: true, matched: 0 };
-  if (invoice.type !== "PURCHASE" && driveConfig?.monthlyTrackingSpreadsheetId && driveConfig.serviceAccountJson) {
+  if (invoice.type !== "PURCHASE" && driveConfig?.enabled && driveConfig.monthlyTrackingSpreadsheetId && driveConfig.serviceAccountJson) {
     const byLink = new Map<string, number>();
     for (const li of invoice.lineItems) {
       const amount = toNumber(li.amount);
@@ -406,6 +406,7 @@ export async function updatePurchaseInvoice(id: string, input: PurchaseInvoiceIn
         termsAndConditions: input.termsAndConditions,
         notes: input.notes,
         vendorInvoiceNumber: input.vendorInvoiceNumber || null,
+        hasSourcePdf: input.hasSourcePdf,
         lineItems: { create: input.lineItems.map((li, i) => ({ ...li, sortOrder: i })) },
       },
     }),

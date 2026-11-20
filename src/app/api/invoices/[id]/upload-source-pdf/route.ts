@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { syncOriginalBillToDrive } from "@/lib/driveSync";
-import { detectPurchaseBillFileKind, mimeTypeForKind } from "@/lib/purchaseBillFileType";
+import { detectPurchaseBillFileKind, mimeTypeForKind, extensionForKind } from "@/lib/purchaseBillFileType";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     partyName: invoice.creator?.name || "Unknown",
     fileBuffer: buffer,
     mimeType: mimeTypeForKind(detected.kind, file.type),
-    fileExt: file.name.split(".").pop()?.toLowerCase() || detected.kind,
+    fileExt: file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : extensionForKind(detected.kind, file.type),
   });
 
   if (driveSyncResult.link) {

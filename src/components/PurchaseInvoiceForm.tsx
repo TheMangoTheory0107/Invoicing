@@ -29,6 +29,7 @@ export interface PurchaseInvoiceInitial {
   termsAndConditions: string;
   notes: string;
   vendorInvoiceNumber: string;
+  hasSourcePdf?: boolean;
   lineItems: LineItemRow[];
 }
 
@@ -212,7 +213,7 @@ export default function PurchaseInvoiceForm({
       termsAndConditions: "",
       notes,
       vendorInvoiceNumber,
-      hasSourcePdf: !isEdit && !!sourcePdfFile,
+      hasSourcePdf: isEdit ? !!initial?.hasSourcePdf : !!sourcePdfFile,
     };
 
     const url = isEdit ? `/api/invoices/${initial!.id}` : "/api/invoices/purchase";

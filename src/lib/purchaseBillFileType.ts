@@ -19,11 +19,43 @@ const MIME_BY_KIND: Record<Exclude<PurchaseBillFileKind, "image">, string> = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 };
 
+const IMAGE_MIME_BY_EXTENSION: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
+};
+
 // For "image", the real mime type (jpeg vs png vs...) varies by file, so the caller's own
-// detected mime type is passed straight through instead of being guessed here.
-export function mimeTypeForKind(kind: PurchaseBillFileKind, actualMimeType?: string): string {
-  if (kind === "image") return actualMimeType || "image/jpeg";
+// detected mime type is normally passed straight through — but some sources (e.g. Drive
+// metadata with nothing set) report a generic placeholder like "application/octet-stream"
+// instead of a real image/* type, which Gemini can't decode. In that case, fall back to the
+// filename's extension rather than trusting a non-image mimetype on image bytes.
+export function mimeTypeForKind(kind: PurchaseBillFileKind, actualMimeType?: string, fileName?: string): string {
+  if (kind === "image") {
+    if (actualMimeType?.startsWith("image/")) return actualMimeType;
+    const ext = fileName?.split(".").pop()?.toLowerCase();
+    return (ext && IMAGE_MIME_BY_EXTENSION[ext]) || "image/jpeg";
+  }
   return MIME_BY_KIND[kind];
+}
+
+const EXTENSION_BY_IMAGE_MIME: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/heif": "heif",
+};
+
+// A real, usable file extension for this kind — used as the fallback when the original
+// filename has no extension of its own (e.g. a phone-camera photo with no dot in its name).
+// Unlike PurchaseBillFileKind itself, "image" is never returned here since it isn't one.
+export function extensionForKind(kind: PurchaseBillFileKind, actualMimeType?: string): string {
+  if (kind === "image") return EXTENSION_BY_IMAGE_MIME[actualMimeType || ""] || "jpg";
+  return kind;
 }
 
 export function detectPurchaseBillFileKind(

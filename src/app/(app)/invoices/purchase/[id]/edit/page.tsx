@@ -33,6 +33,7 @@ export default async function EditPurchaseInvoicePage({ params }: { params: { id
             termsAndConditions: invoice.termsAndConditions || "",
             notes: invoice.notes || "",
             vendorInvoiceNumber: invoice.vendorInvoiceNumber || "",
+            hasSourcePdf: invoice.hasSourcePdf,
             lineItems: invoice.lineItems.map((li) => ({
               description: li.description,
               link1: li.link1 || "",

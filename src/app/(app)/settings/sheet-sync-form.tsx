@@ -135,7 +135,8 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
   async function onBackfillPaymentReferences() {
     if (
       !confirm(
-        "This reads the \"UTR / Reference\" column out of the Sales/Commission/Purchase Register tabs and writes it onto the matching payment(s) already recorded in the app, overwriting any reference already set there. Continue?"
+        "This reads the \"UTR / Reference\" column out of the Sales/Commission/Purchase Register tabs and writes it onto the matching payment(s) already recorded in the app, overwriting any reference already set there.\n\n" +
+          "It matches references to payments purely by order (1st reference → 1st payment, 2nd → 2nd, ...) with no cross-check — if a row's references and this app's payments aren't in the exact same order and count (e.g. a reference was added as a note, or a payment was deleted), a reference can land on the wrong payment with no warning. Only run this right after entering/reviewing that row's references, and check a few results afterwards. Continue?"
       )
     ) {
       return;

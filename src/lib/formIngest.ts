@@ -2,13 +2,14 @@ import { prisma } from "@/lib/prisma";
 import { getSettings } from "@/lib/settings";
 import { toNumber } from "@/lib/format";
 import { extractPurchaseBill, GeminiExtractError } from "@/lib/geminiExtract";
-import { detectPurchaseBillFileKind, mimeTypeForKind } from "@/lib/purchaseBillFileType";
+import { detectPurchaseBillFileKind, mimeTypeForKind, extensionForKind } from "@/lib/purchaseBillFileType";
 import { xlsxBufferToText, csvBufferToText, docxBufferToText } from "@/lib/purchaseBillTextExtract";
 import { extractDriveFileId, downloadDriveFileAsUser, DriveSyncError } from "@/lib/googleDrive";
 import { getFormResponseSheet, colorSheetRow, writeStatusCell, SheetSyncError } from "@/lib/googleSheets";
 import { syncOriginalBillToDrive } from "@/lib/driveSync";
 import { createPurchaseInvoice } from "@/lib/invoiceService";
 import { sendPlainEmail } from "@/lib/email";
+import { parseFlexibleDate } from "@/lib/importRegister";
 
 // Only this many brand-new bills get Gemini-extracted per run — each one can take up to ~45s
 // (the extraction's own retry/fallback chain), and this has to fit inside the serverless
@@ -20,11 +21,6 @@ const MAX_NEW_PER_RUN = 1;
 // already in the app but wasn't created from this form — rounding differences only.
 const AMOUNT_TOLERANCE = 2;
 const DATE_PROXIMITY_DAYS = 10;
-// Column O — not one of the form's own columns, so free to use. Holds the reason a row couldn't
-// be auto-processed, and doubles as a persistent "already attempted this one" marker so a
-// permanently-failing row doesn't eat the per-run Gemini budget on every single run forever and
-// block every row after it. Clearing the cell by hand asks for a retry.
-const STATUS_COL = 14;
 
 export interface FormIngestSummary {
   attempted: boolean;
@@ -56,11 +52,6 @@ function parseRupeeAmount(text: string): number | null {
   if (!digits) return null;
   const n = parseFloat(digits);
   return Number.isFinite(n) ? n : null;
-}
-
-function parseLooseDate(text: string): Date | null {
-  const d = new Date(text);
-  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 async function matchOrCreateCreator(vendorName: string, extracted: Awaited<ReturnType<typeof extractPurchaseBill>>) {
@@ -148,6 +139,14 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
     };
   }
 
+  // Not one of the form's own columns — one past the last real header, computed fresh from this
+  // run's actual header row rather than a fixed index, so it never lands on a real answer even
+  // after the form gains a new question and Sheets shifts everything after it. Holds the reason
+  // a row couldn't be auto-processed, and doubles as a persistent "already attempted this one"
+  // marker so a permanently-failing row doesn't eat the per-run Gemini budget on every single run
+  // forever and block every row after it. Clearing the cell by hand asks for a retry.
+  const statusCol = sheet.headers.length;
+
   for (const row of sheet.rows) {
     const attachmentLink = row.values[attachmentCol]?.trim();
     if (!attachmentLink) continue;
@@ -169,14 +168,14 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
       // Only clears a genuine failure note (from a prior attempt that's now resolved) — never
       // an informational "created, but Drive filing failed" note, which stays relevant for an
       // invoice that already exists and won't be re-attempted.
-      const existingNote = row.values[STATUS_COL]?.trim();
+      const existingNote = row.values[statusCol]?.trim();
       if (existingNote && !existingNote.startsWith("Created ")) {
         await writeStatusCell({
           serviceAccountJson: config.serviceAccountJson,
           spreadsheetId: config.formResponsesSpreadsheetId,
           sheetName,
           rowIndex: row.rowIndex,
-          columnIndex: STATUS_COL,
+          columnIndex: statusCol,
           value: "",
         }).catch(() => {});
       }
@@ -193,7 +192,7 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
       .filter(Boolean);
     const rowInvoiceNumber = invoiceNumberCol !== -1 ? row.values[invoiceNumberCol]?.trim() : "";
     const rowPayout = payoutCol !== -1 ? parseRupeeAmount(row.values[payoutCol] || "") : null;
-    const rowDate = invoiceDateCol !== -1 ? parseLooseDate(row.values[invoiceDateCol] || "") : null;
+    const rowDate = invoiceDateCol !== -1 ? parseFlexibleDate(row.values[invoiceDateCol] || "") : null;
 
     // Reconcile against a bill already entered some other way, before touching Gemini at all.
     // No DB-level name filter here — a reverse-direction loose match (the row's name contains
@@ -231,13 +230,13 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
           columnCount: sheet.headers.length,
           color: "green",
         }).catch(() => {});
-        if (row.values[STATUS_COL]?.trim()) {
+        if (row.values[statusCol]?.trim()) {
           await writeStatusCell({
             serviceAccountJson: config.serviceAccountJson,
             spreadsheetId: config.formResponsesSpreadsheetId,
             sheetName,
             rowIndex: row.rowIndex,
-            columnIndex: STATUS_COL,
+            columnIndex: statusCol,
             value: "",
           }).catch(() => {});
         }
@@ -249,7 +248,7 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
     // A row already flagged with a reason on a previous run is left alone — otherwise a single
     // permanently-failing row would eat the one-per-run Gemini budget forever and block every
     // row after it from ever getting a turn. Clearing the cell by hand asks for a fresh attempt.
-    if (row.values[STATUS_COL]?.trim()) continue;
+    if (row.values[statusCol]?.trim()) continue;
 
     // Brand new — needs Gemini. Budget-limited per run; anything past the budget is genuinely
     // still pending (not failed), so a multi-round catch-up knows there's more to do.
@@ -267,13 +266,14 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
       });
       const detected = detectPurchaseBillFileKind(file.name, file.mimeType);
       if ("error" in detected) throw new Error(detected.error);
+      const resolvedMimeType = mimeTypeForKind(detected.kind, file.mimeType, file.name);
 
       const extracted =
         detected.kind === "pdf"
           ? await extractPurchaseBill({ kind: "pdf", buffer: file.buffer }, settings.geminiApiKey, settings.geminiModel)
           : detected.kind === "image"
           ? await extractPurchaseBill(
-              { kind: "image", buffer: file.buffer, mimeType: file.mimeType },
+              { kind: "image", buffer: file.buffer, mimeType: resolvedMimeType },
               settings.geminiApiKey,
               settings.geminiModel
             )
@@ -353,8 +353,8 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
         number: invoice.number,
         partyName: creator.name,
         fileBuffer: file.buffer,
-        mimeType: mimeTypeForKind(detected.kind, file.mimeType),
-        fileExt: file.name.split(".").pop()?.toLowerCase() || detected.kind,
+        mimeType: resolvedMimeType,
+        fileExt: file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : extensionForKind(detected.kind, resolvedMimeType),
       });
       if (driveResult.link) {
         await prisma.invoice.update({ where: { id: invoice.id }, data: { pdfPath: driveResult.link } });
@@ -371,7 +371,7 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
           spreadsheetId: config.formResponsesSpreadsheetId,
           sheetName,
           rowIndex: row.rowIndex,
-          columnIndex: STATUS_COL,
+          columnIndex: statusCol,
           value: `Created ${invoice.number}, but filing to Drive failed: ${driveResult.error || "unknown error"}`,
         }).catch(() => {});
       }
@@ -417,7 +417,7 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
         spreadsheetId: config.formResponsesSpreadsheetId,
         sheetName,
         rowIndex: row.rowIndex,
-        columnIndex: STATUS_COL,
+        columnIndex: statusCol,
         value: message,
       }).catch(() => {});
     }

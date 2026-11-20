@@ -72,8 +72,21 @@ function excelCellToString(cell: ExcelJS.Cell): string {
 }
 
 // Converts raw rows into header-keyed objects, treating `headerRowIndex` as the header row.
+// Repeated header names (two columns with the same label) would otherwise silently collapse
+// to whichever one is read last — mirrors PapaParse's own header:true behavior of suffixing
+// repeats as "_1", "_2", etc. so every column's data survives.
+function dedupeHeaders(headers: string[]): string[] {
+  const seen = new Map<string, number>();
+  return headers.map((header) => {
+    if (!header) return header;
+    const count = seen.get(header) ?? 0;
+    seen.set(header, count + 1);
+    return count === 0 ? header : `${header}_${count}`;
+  });
+}
+
 export function rowsToObjects(rawRows: string[][], headerRowIndex: number): ImportRow[] {
-  const headers = (rawRows[headerRowIndex] || []).map(normalizeHeader);
+  const headers = dedupeHeaders((rawRows[headerRowIndex] || []).map(normalizeHeader));
   const rows: ImportRow[] = [];
   for (let i = headerRowIndex + 1; i < rawRows.length; i++) {
     const raw = rawRows[i];

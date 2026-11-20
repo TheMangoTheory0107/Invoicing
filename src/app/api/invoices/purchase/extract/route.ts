@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSettings } from "@/lib/settings";
 import { extractPurchaseBill, GeminiExtractError } from "@/lib/geminiExtract";
-import { detectPurchaseBillFileKind } from "@/lib/purchaseBillFileType";
+import { detectPurchaseBillFileKind, mimeTypeForKind } from "@/lib/purchaseBillFileType";
 import { xlsxBufferToText, csvBufferToText, docxBufferToText } from "@/lib/purchaseBillTextExtract";
 
 // Gemini can take a while on a PDF, especially on a newly-released model under heavy load —
@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
       extracted = await extractPurchaseBill({ kind: "pdf", buffer }, settings.geminiApiKey, settings.geminiModel);
     } else if (detected.kind === "image") {
       extracted = await extractPurchaseBill(
-        { kind: "image", buffer, mimeType: file.type || "image/jpeg" },
+        { kind: "image", buffer, mimeType: mimeTypeForKind("image", file.type, file.name) },
         settings.geminiApiKey,
         settings.geminiModel
       );
