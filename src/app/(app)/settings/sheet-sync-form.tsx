@@ -45,6 +45,12 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     | { ok: false; error: string }
     | null
   >(null);
+  const [refBackfilling, setRefBackfilling] = useState(false);
+  const [refBackfillResult, setRefBackfillResult] = useState<
+    | { ok: true; invoicesChecked: number; paymentsUpdated: number }
+    | { ok: false; error: string }
+    | null
+  >(null);
   const [formSyncing, setFormSyncing] = useState(false);
   const [formSyncLooping, setFormSyncLooping] = useState(false);
   const formSyncStopRef = useRef(false);
@@ -124,6 +130,22 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     const data = await res.json();
     setBackfilling(false);
     setBackfillResult(res.ok ? { ok: true, ...data } : { ok: false, error: data.error || "Could not run the backfill." });
+  }
+
+  async function onBackfillPaymentReferences() {
+    if (
+      !confirm(
+        "This reads the \"UTR / Reference\" column out of the Sales/Commission/Purchase Register tabs and writes it onto the matching payment(s) already recorded in the app, overwriting any reference already set there. Continue?"
+      )
+    ) {
+      return;
+    }
+    setRefBackfilling(true);
+    setRefBackfillResult(null);
+    const res = await fetch("/api/settings/sheets/backfill-payment-references", { method: "POST" });
+    const data = await res.json();
+    setRefBackfilling(false);
+    setRefBackfillResult(res.ok ? { ok: true, ...data } : { ok: false, error: data.error || "Could not run the backfill." });
   }
 
   type SyncRoundResult =
@@ -379,6 +401,44 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
           )}
         </div>
       )}
+
+      <div className="border-t border-slate-100 pt-4">
+        <h3 className="text-sm font-semibold text-slate-800">Payment reference (UTR) sync</h3>
+        <p className="text-xs text-slate-500 mt-1">
+          Add a column titled exactly <strong>UTR / Reference</strong> to each of the Sales,
+          Commission, and Purchase Register tabs above (the app never creates sheet columns
+          itself — your team adds it once). From then on, every payment this app records is
+          written there automatically, in order, alongside <strong>Payment History</strong>; and
+          typing a reference into that column by hand and running the backfill below pulls it
+          back into the matching payment here. Rows also get colored automatically going
+          forward — bright green once a bill is fully paid (zero balance), light yellow while
+          it&apos;s partially paid.
+        </p>
+        <div className="flex items-center gap-3 mt-3">
+          <button
+            type="button"
+            onClick={onBackfillPaymentReferences}
+            disabled={refBackfilling || !form.spreadsheetId || !form.serviceAccountJson}
+            className="rounded-md border border-slate-300 text-sm font-medium px-4 py-2 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {refBackfilling ? "Running…" : "Backfill payment references"}
+          </button>
+          <span className="text-xs text-slate-400">
+            Pulls hand-typed UTRs from the sheet into the app. Safe to re-run.
+          </span>
+        </div>
+        {refBackfillResult && (
+          <div
+            className={`rounded-md px-3 py-2 text-sm mt-2 ${
+              refBackfillResult.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+            }`}
+          >
+            {refBackfillResult.ok
+              ? `Checked ${refBackfillResult.invoicesChecked} invoice(s), updated ${refBackfillResult.paymentsUpdated} payment reference(s).`
+              : refBackfillResult.error}
+          </div>
+        )}
+      </div>
 
       <div className="border-t border-slate-100 pt-4">
         <h3 className="text-sm font-semibold text-slate-800">Monthly sheet Bill No sync</h3>

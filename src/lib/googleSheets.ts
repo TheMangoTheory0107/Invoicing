@@ -510,6 +510,44 @@ function columnLetter(index: number): string {
 // mapping fields by header name. Only the specific cells for headers we know about are
 // touched (via per-cell batchUpdate) so any extra columns the CA has added by hand — notes,
 // manual flags, whatever — are never clobbered on an update.
+const ROW_PAID_GREEN = { red: 0.2, green: 0.73, blue: 0.33 }; // bright — distinct from the softer ROW_GREEN above
+const ROW_PARTIAL_YELLOW = { red: 1, green: 0.95, blue: 0.6 };
+const ROW_CLEAR = { red: 1, green: 1, blue: 1 };
+
+export type RegisterRowColor = "paid" | "partial" | "none";
+
+// Reads one register tab's key column (Bill no / Internal Ref) alongside another column,
+// keyed by the key column's value — used to pull hand-typed payment references back into the
+// app. One range read for the whole tab rather than per-row lookups.
+export async function readRegisterColumnByKey(params: {
+  serviceAccountJson: string;
+  spreadsheetId: string;
+  sheetName: string;
+  keyHeader: string;
+  valueHeader: string;
+}): Promise<Map<string, string>> {
+  const { serviceAccountJson, spreadsheetId, sheetName, keyHeader, valueHeader } = params;
+  const sheets = getSheetsClient(serviceAccountJson);
+  const headers = await getHeaderRow(sheets, spreadsheetId, sheetName);
+  const norm = (s: string) => s.trim().toLowerCase();
+  const keyColIndex = headers.findIndex((h) => norm(h) === norm(keyHeader));
+  const valueColIndex = headers.findIndex((h) => norm(h) === norm(valueHeader));
+  if (keyColIndex === -1 || valueColIndex === -1) return new Map();
+
+  const lastCol = columnLetter(Math.max(keyColIndex, valueColIndex));
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${quoteSheetName(sheetName)}!A2:${lastCol}`,
+  });
+  const map = new Map<string, string>();
+  for (const row of res.data.values || []) {
+    const key = String(row[keyColIndex] ?? "").trim();
+    if (!key) continue;
+    map.set(key, String(row[valueColIndex] ?? "").trim());
+  }
+  return map;
+}
+
 export async function upsertRegisterRow(params: {
   serviceAccountJson: string;
   spreadsheetId: string;
@@ -517,8 +555,9 @@ export async function upsertRegisterRow(params: {
   keyHeader: string;
   keyValue: string;
   values: Record<string, string | number>;
+  rowColor?: RegisterRowColor;
 }) {
-  const { serviceAccountJson, spreadsheetId, sheetName, keyHeader, keyValue, values } = params;
+  const { serviceAccountJson, spreadsheetId, sheetName, keyHeader, keyValue, values, rowColor } = params;
   const sheets = getSheetsClient(serviceAccountJson);
   const headers = await getHeaderRow(sheets, spreadsheetId, sheetName);
 
@@ -554,12 +593,41 @@ export async function upsertRegisterRow(params: {
     })
     .filter((v): v is { range: string; values: string[][] } => v !== null);
 
-  if (data.length === 0) return;
+  if (data.length > 0) {
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: { valueInputOption: "USER_ENTERED", data },
+    });
+  }
 
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId,
-    requestBody: { valueInputOption: "USER_ENTERED", data },
-  });
+  if (rowColor) {
+    const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: "sheets.properties" });
+    const sheetId = (meta.data.sheets || []).find((s) => s.properties?.title === sheetName)?.properties?.sheetId;
+    if (sheetId != null) {
+      const backgroundColor =
+        rowColor === "paid" ? ROW_PAID_GREEN : rowColor === "partial" ? ROW_PARTIAL_YELLOW : ROW_CLEAR;
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              repeatCell: {
+                range: {
+                  sheetId,
+                  startRowIndex: targetRow - 1,
+                  endRowIndex: targetRow,
+                  startColumnIndex: 0,
+                  endColumnIndex: headers.length,
+                },
+                cell: { userEnteredFormat: { backgroundColor } },
+                fields: "userEnteredFormat.backgroundColor",
+              },
+            },
+          ],
+        },
+      });
+    }
+  }
 }
 
 // Removes a register row entirely (not just clearing its cells) when its invoice is deleted

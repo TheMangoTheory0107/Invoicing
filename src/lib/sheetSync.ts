@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/prisma";
-import { upsertRegisterRow, deleteRegisterRow, SheetSyncError } from "@/lib/googleSheets";
+import { upsertRegisterRow, deleteRegisterRow, readRegisterColumnByKey, SheetSyncError, type RegisterRowColor } from "@/lib/googleSheets";
 import { toNumber } from "@/lib/format";
 import { formatDateDMY } from "@/lib/fy";
 import type { Invoice, Party, Payment } from "@prisma/client";
+
+const REFERENCE_HEADER = "UTR / Reference";
 
 export interface SyncResult {
   attempted: boolean;
@@ -25,6 +27,24 @@ function paymentHistory(invoice: InvoiceWithParties): string {
     .sort((a, b) => a.date.getTime() - b.date.getTime())
     .map((p) => `${formatDateDMY(p.date)}: ₹${Math.round(toNumber(p.amount)).toLocaleString("en-IN")}`)
     .join("; ");
+}
+
+// Same order as paymentHistory above — oldest first — so a reference typed back into the sheet
+// for "the 2nd payment" lines up with the 2nd entry here when read back in. Empty references
+// are kept as empty slots (not dropped) so the positional alignment survives a part payment
+// with no reference followed by one that has one.
+function paymentReferences(invoice: InvoiceWithParties): string {
+  if (!invoice.payments?.length) return "";
+  return [...invoice.payments]
+    .sort((a, b) => a.date.getTime() - b.date.getTime())
+    .map((p) => p.reference?.trim() || "")
+    .join("; ");
+}
+
+function rowColorForStatus(status: string): RegisterRowColor {
+  if (status === "PAID") return "paid";
+  if (status === "PARTIAL") return "partial";
+  return "none";
 }
 
 // Pushes one invoice's row to its Sales, Commission, or Purchase Register sheet. Never
@@ -58,7 +78,9 @@ export async function syncInvoiceToSheet(invoice: InvoiceWithParties): Promise<S
           "TDS Deducted": toNumber(invoice.tdsDeducted),
           Balance: toNumber(invoice.totalAmount) - toNumber(invoice.amountPaid) - toNumber(invoice.tdsDeducted),
           "Payment History": paymentHistory(invoice),
+          [REFERENCE_HEADER]: paymentReferences(invoice),
         },
+        rowColor: rowColorForStatus(invoice.status),
       });
     } else {
       // Keyed on "Internal Ref" (our own number) rather than the vendor's invoice number,
@@ -91,7 +113,9 @@ export async function syncInvoiceToSheet(invoice: InvoiceWithParties): Promise<S
           "TDS Deducted": toNumber(invoice.tdsDeducted),
           Balance: toNumber(invoice.totalAmount) - toNumber(invoice.amountPaid) - toNumber(invoice.tdsDeducted),
           "Payment History": paymentHistory(invoice),
+          [REFERENCE_HEADER]: paymentReferences(invoice),
         },
+        rowColor: rowColorForStatus(invoice.status),
       });
     }
     return { attempted: true, ok: true };
@@ -132,5 +156,72 @@ export async function deleteInvoiceFromSheet(invoice: InvoiceWithParties): Promi
   } catch (err) {
     const message = err instanceof SheetSyncError ? err.message : "Unexpected sync error.";
     return { attempted: true, ok: false, error: message };
+  }
+}
+
+export interface PaymentReferenceBackfillResult {
+  ok: boolean;
+  invoicesChecked: number;
+  paymentsUpdated: number;
+  error?: string;
+}
+
+// One-time (but safe to re-run) catch-up: reads the "UTR / Reference" column back out of each
+// register tab and writes it onto the matching payment(s) in the app — the reverse direction
+// of what syncInvoiceToSheet above writes out. Entries line up positionally with payments
+// ordered oldest-first, same convention as Payment History; a row with fewer reference entries
+// than payments only updates the ones it has, and an empty entry is left alone rather than
+// blanking out a reference the app already has.
+export async function backfillPaymentReferences(): Promise<PaymentReferenceBackfillResult> {
+  const config = await prisma.sheetSyncConfig.findUnique({ where: { id: 1 } });
+  if (!config?.spreadsheetId || !config.serviceAccountJson) {
+    return {
+      ok: false,
+      invoicesChecked: 0,
+      paymentsUpdated: 0,
+      error: "Set up the spreadsheet ID and service account in Settings → Google Sheets & Drive sync first.",
+    };
+  }
+
+  const tabs: { type: "SALES" | "COMMISSION" | "PURCHASE"; sheetName: string; keyHeader: string }[] = [
+    { type: "SALES", sheetName: config.salesSheetName, keyHeader: "Bill no" },
+    { type: "COMMISSION", sheetName: config.commissionSheetName, keyHeader: "Bill no" },
+    { type: "PURCHASE", sheetName: config.purchaseSheetName, keyHeader: "Internal Ref" },
+  ];
+
+  let invoicesChecked = 0;
+  let paymentsUpdated = 0;
+  try {
+    for (const tab of tabs) {
+      const refMap = await readRegisterColumnByKey({
+        serviceAccountJson: config.serviceAccountJson,
+        spreadsheetId: config.spreadsheetId,
+        sheetName: tab.sheetName,
+        keyHeader: tab.keyHeader,
+        valueHeader: REFERENCE_HEADER,
+      });
+      if (refMap.size === 0) continue;
+
+      const invoices = await prisma.invoice.findMany({
+        where: { type: tab.type, number: { in: Array.from(refMap.keys()) } },
+        include: { payments: true },
+      });
+      for (const inv of invoices) {
+        invoicesChecked++;
+        const cellText = refMap.get(inv.number);
+        if (!cellText) continue;
+        const refs = cellText.split(";").map((s) => s.trim());
+        const payments = [...inv.payments].sort((a, b) => a.date.getTime() - b.date.getTime());
+        for (let i = 0; i < Math.min(refs.length, payments.length); i++) {
+          if (!refs[i] || payments[i].reference === refs[i]) continue;
+          await prisma.payment.update({ where: { id: payments[i].id }, data: { reference: refs[i] } });
+          paymentsUpdated++;
+        }
+      }
+    }
+    return { ok: true, invoicesChecked, paymentsUpdated };
+  } catch (err) {
+    const message = err instanceof SheetSyncError ? err.message : "Could not read payment references.";
+    return { ok: false, invoicesChecked, paymentsUpdated, error: message };
   }
 }
