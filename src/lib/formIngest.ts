@@ -329,7 +329,7 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
         dueDate: extracted.dueDate || null,
         billAmount: extracted.billAmount,
         gstAmount: extracted.gstAmount,
-        reimbursements: 0,
+        reimbursements: extracted.reimbursements || 0,
         vendorInvoiceNumber: vendorInvoiceNumber || rowInvoiceNumber || "",
         hasSourcePdf: true,
         notes: "",

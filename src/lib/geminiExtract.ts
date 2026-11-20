@@ -19,6 +19,10 @@ export interface ExtractedPurchaseBill {
   vendorUpiId: string;
   billAmount: number;
   gstAmount: number;
+  // A product/material cost being reimbursed (e.g. "product purchased, to be reimbursed") —
+  // kept separate from billAmount because it's not part of the taxable professional fee: no
+  // GST, no TDS. 0 if the bill doesn't mention one.
+  reimbursements: number;
   totalAmount: number;
   lineItems: { description: string; qty: number; rate: number; amount: number }[];
 }
@@ -38,8 +42,12 @@ const SCHEMA = {
     vendorBankAccNo: { type: "STRING" },
     vendorIfsc: { type: "STRING" },
     vendorUpiId: { type: "STRING" },
-    billAmount: { type: "NUMBER", description: "Taxable value before GST" },
+    billAmount: { type: "NUMBER", description: "Taxable value before GST — excludes any product/material reimbursement" },
     gstAmount: { type: "NUMBER" },
+    reimbursements: {
+      type: "NUMBER",
+      description: "A separate product/material cost being reimbursed, not part of the taxable fee — 0 if none mentioned",
+    },
     totalAmount: { type: "NUMBER" },
     lineItems: {
       type: "ARRAY",
@@ -61,6 +69,7 @@ const SCHEMA = {
 const PROMPT = `This document is a tax invoice/bill sent to us by a vendor (a content creator or agency being paid for services). Extract the fields as JSON matching the schema exactly.
 
 - billAmount is the taxable value BEFORE GST. If the document only shows a GST-inclusive total plus a GST amount, compute billAmount = total - GST.
+- If the bill separately mentions a product or material cost being reimbursed (phrases like "product purchased", "product cost", "product reimbursement", usually with no GST charged on it) — extract that amount as reimbursements, a field of its own. It must NOT be folded into billAmount, gstAmount, or any lineItems entry: that amount isn't part of the taxable professional fee, so including it there would wrongly pull it into GST/TDS calculations. If nothing like this is mentioned, reimbursements is 0.
 - Dates must be formatted YYYY-MM-DD. If a due date isn't stated, use an empty string.
 - lineItems should list each billed item/service with its description, quantity, rate, and amount — if the invoice has no item-level breakdown, return a single line item summarizing the whole bill with qty 1 and rate/amount equal to billAmount.
 - Also look for the vendor's own bank payment details, often in a footer or a "Payment Details" / "Bank Details" box: account holder name, bank name, account number, IFSC code, and UPI ID. Extract whichever of these are present.

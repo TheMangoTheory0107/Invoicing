@@ -166,6 +166,7 @@ export default function PurchaseInvoiceForm({
     if (extracted.invoiceDate) setDate(extracted.invoiceDate);
     if (extracted.dueDate) setDueDate(extracted.dueDate);
     if (extracted.gstAmount) setGstAmount(extracted.gstAmount);
+    if (extracted.reimbursements) setReimbursements(extracted.reimbursements);
     if (extracted.lineItems?.length) {
       setLineItems(
         extracted.lineItems.map((li: { description: string; qty: number; rate: number; amount: number }) => ({
