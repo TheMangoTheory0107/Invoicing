@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/sync-form-invoices",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/weekly-backup",
+      "schedule": "0 4 * * 1"
     }
   ]
 }
