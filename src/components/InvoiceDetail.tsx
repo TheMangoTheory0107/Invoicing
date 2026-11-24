@@ -120,7 +120,7 @@ export default function InvoiceDetail({ data }: { data: InvoiceDetailData }) {
       setError("Could not record payment.");
       return;
     }
-    warnOnSyncFailure(resData.syncResult);
+    warnOnSyncFailure(resData.syncResult, null, null, resData.tdsSyncResult);
     router.refresh();
   }
 

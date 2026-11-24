@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { parseDateOnly } from "@/lib/fy";
 import { recomputeInvoiceStatus } from "@/lib/payments";
+import { syncPaymentToTdsTracker } from "@/lib/tdsSync";
 
 const schema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -39,5 +40,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   });
 
   const { invoice: updated, syncResult } = await recomputeInvoiceStatus(params.id);
-  return NextResponse.json({ invoice: updated, syncResult }, { status: 201 });
+
+  // TDS is remitted to the government per payment, not per invoice — so the tracker gets a row
+  // every time a creator payment withholds TDS, not just once the bill is fully paid.
+  const tdsSyncResult =
+    updated.type === "PURCHASE" && parsed.data.tdsAmount > 0
+      ? await syncPaymentToTdsTracker({
+          creatorName: updated.creator?.name || "Unknown",
+          panNo: updated.creator?.panNo || null,
+          date: parseDateOnly(parsed.data.date),
+          amount: parsed.data.amount,
+          tdsAmount: parsed.data.tdsAmount,
+        })
+      : { attempted: false, ok: true };
+
+  return NextResponse.json({ invoice: updated, syncResult, tdsSyncResult }, { status: 201 });
 }

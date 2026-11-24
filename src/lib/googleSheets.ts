@@ -676,3 +676,81 @@ export async function deleteRegisterRow(params: {
     },
   });
 }
+
+// Capitalized for the tab name ("Nov 2026", "Sept 2026" — September is spelled out to 4
+// letters in this workbook, every other month is 3), and re-used uppercased for the row's own
+// "Month" cell ("NOV", "SEPT") since both conventions match this sheet's existing data exactly.
+const TDS_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec"];
+
+function tdsTrackerTabName(date: Date): string {
+  return `${TDS_MONTH_NAMES[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
+// Appends one row to the TDS tracker workbook's tab for this payment's month. That tab (e.g.
+// "Nov 2026") must already exist — a brand-new month's tab is copied by hand from the previous
+// month to carry over its formulas and formatting, same as every month in this workbook so far;
+// this never creates one itself. Columns are matched by header name (not position), since the
+// sheet's own "Sect" column is actually unused — the section code (194J/194H/194C) goes into
+// the " Professional Fees (GST 18%) " column instead, matching how this sheet's owner already
+// fills it in by hand.
+export async function appendTdsTrackerRow(params: {
+  serviceAccountJson: string;
+  spreadsheetId: string;
+  date: Date;
+  particulars: string;
+  panNo: string;
+  sectionCode: string;
+  tdsRate: string;
+  total: number;
+}): Promise<void> {
+  const { serviceAccountJson, spreadsheetId, date, particulars, panNo, sectionCode, tdsRate, total } = params;
+  const sheetName = tdsTrackerTabName(date);
+  const sheets = getSheetsClient(serviceAccountJson);
+
+  let headers: string[];
+  try {
+    headers = await getHeaderRow(sheets, spreadsheetId, sheetName);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new SheetSyncError(
+      `Tab "${sheetName}" not found in the TDS tracker spreadsheet — copy a previous month's tab to create it first. (${message})`
+    );
+  }
+  if (headers.length === 0) {
+    throw new SheetSyncError(`Tab "${sheetName}" not found in the TDS tracker spreadsheet — copy a previous month's tab to create it first.`);
+  }
+
+  const norm = (s: string) => s.trim().toLowerCase();
+  const findCol = (...candidates: string[]) => {
+    for (const c of candidates) {
+      const idx = headers.findIndex((h) => norm(h) === norm(c));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+
+  const dateCol = findCol("date");
+  const particularsCol = findCol("particulars");
+  const panCol = findCol("pan no.", "pan no", "pan");
+  const sectionCol = findCol("professional fees (gst 18%)", "sect");
+  const rateCol = findCol("tds");
+  const monthCol = findCol("month");
+  const totalCol = findCol("total");
+
+  const row = new Array(headers.length).fill("");
+  if (dateCol !== -1) row[dateCol] = `${date.getUTCMonth() + 1}/${date.getUTCDate()}/${date.getUTCFullYear()}`;
+  if (particularsCol !== -1) row[particularsCol] = particulars;
+  if (panCol !== -1) row[panCol] = panNo;
+  if (sectionCol !== -1) row[sectionCol] = sectionCode;
+  if (rateCol !== -1) row[rateCol] = tdsRate;
+  if (monthCol !== -1) row[monthCol] = TDS_MONTH_NAMES[date.getUTCMonth()].toUpperCase();
+  if (totalCol !== -1) row[totalCol] = String(total);
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: `${quoteSheetName(sheetName)}!A:${columnLetter(headers.length - 1)}`,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [row] },
+  });
+}

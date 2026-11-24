@@ -265,6 +265,12 @@ model SheetSyncConfig {
   // "Monthly sheet Bill No sync" feature reads/writes this one specifically. Needs sharing
   // (Editor) with the same service account.
   monthlyTrackingSpreadsheetId String @default("")
+  // A fourth, separate spreadsheet: the TDS tracker workbook, with one tab per month (e.g.
+  // "Nov 2026", "Sept 2026") already set up by hand. Every creator payment that withholds TDS
+  // appends a row to that month's tab — gated by `enabled` above same as the Register sync,
+  // since both are automatic sheet writes triggered by the same invoice-save/payment events.
+  // Needs sharing (Editor) with the same service account.
+  tdsSpreadsheetId String @default("")
 }
 
 model User {

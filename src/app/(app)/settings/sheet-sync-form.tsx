@@ -16,6 +16,7 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     formResponsesSheetName: config.formResponsesSheetName,
     formResponsesImpersonate: config.formResponsesImpersonate,
     monthlyTrackingSpreadsheetId: config.monthlyTrackingSpreadsheetId,
+    tdsSpreadsheetId: config.tdsSpreadsheetId,
   });
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -521,6 +522,33 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
       </div>
 
       <div className="border-t border-slate-100 pt-4">
+        <h3 className="text-sm font-semibold text-slate-800">TDS tracker sheet</h3>
+        <p className="text-xs text-slate-500 mt-1">
+          Every time you record a creator payment that withholds TDS, a row is appended to{" "}
+          <strong>that month&apos;s tab</strong> (e.g. &quot;Nov 2026&quot;) in this separate
+          TDS tracker spreadsheet — not the Register workbook above. The tab for the payment&apos;s
+          month must already exist (copy a previous month&apos;s tab by hand first — this never
+          creates one). The section code is worked out from the TDS rate actually withheld on
+          that payment: 10% → 194J, 2% → 194H, 1% → 194C. The Total column written is the gross
+          amount (the payment plus the TDS withheld on it), not the net cash paid. This also
+          requires &quot;Enable automatic Sheets sync&quot; above to be turned on.
+        </p>
+        <label className="block max-w-md mt-3">
+          <span className="block text-xs font-medium text-slate-600 mb-1">
+            TDS tracker spreadsheet ID{" "}
+            <span className="font-normal text-slate-400">— must also be shared (Editor) with the service account above</span>
+          </span>
+          <input
+            type="text"
+            value={form.tdsSpreadsheetId}
+            onChange={(e) => set("tdsSpreadsheetId", e.target.value)}
+            placeholder="The spreadsheet ID from its URL"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+          />
+        </label>
+      </div>
+
+      <div className="border-t border-slate-100 pt-4">
         <h3 className="text-sm font-semibold text-slate-800">Creator bill-submission form → auto Purchase bill</h3>
         <p className="text-xs text-slate-500 mt-1">
           Reads your Google Form&apos;s responses sheet (a different spreadsheet from the
@@ -530,10 +558,10 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
           amount — so a renamed or re-saved file still matches), the row is just marked green;
           otherwise the attached bill is downloaded and read the same way the manual Purchase
           bill upload works, a bill is auto-created, and the row is marked green. A row that
-          can&apos;t be processed is marked light red, with the reason written into column O of
-          that row — clear that cell by hand to ask for a retry, otherwise it&apos;s left alone
-          on later runs so one bad row can&apos;t block the ones after it. Runs automatically
-          once a day, plus on demand below.
+          can&apos;t be processed is marked light red, with the reason written into the column
+          right after your form&apos;s own last column — clear that cell by hand to ask for a
+          retry, otherwise it&apos;s left alone on later runs so one bad row can&apos;t block the
+          ones after it. Runs automatically once a day, plus on demand below.
         </p>
         <div className="grid grid-cols-2 gap-4 mt-3">
           <label className="block">

@@ -14,6 +14,7 @@ const schema = z.object({
   formResponsesSheetName: z.string().default("Form Responses 1"),
   formResponsesImpersonate: z.string().default(""),
   monthlyTrackingSpreadsheetId: z.string().default(""),
+  tdsSpreadsheetId: z.string().default(""),
 });
 
 export async function PUT(req: NextRequest) {
