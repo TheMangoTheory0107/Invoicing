@@ -34,6 +34,15 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string }[] }[] 
     items: [{ href: "/payroll", label: "Employees" }],
   },
   {
+    label: "Personal",
+    items: [
+      { href: "/personal", label: "My Money" },
+      { href: "/personal/transactions", label: "Transactions" },
+      { href: "/personal/import", label: "Import Statement" },
+      { href: "/personal/plan", label: "Plan & Salary" },
+    ],
+  },
+  {
     label: "Setup",
     items: [
       { href: "/parties/clients", label: "Clients / Agencies" },
@@ -74,7 +83,7 @@ export default function Sidebar() {
             <div className="space-y-0.5">
               {group.items.map((item) => {
                 const active =
-                  item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+                  item.href === "/" || item.href === "/personal" ? pathname === item.href : pathname.startsWith(item.href);
                 return (
                   <Link
                     key={item.href}

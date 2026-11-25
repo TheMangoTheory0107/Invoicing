@@ -277,3 +277,76 @@ model User {
   id           Int    @id @default(1)
   passwordHash String
 }
+
+// ---------------------------------------------------------------------------------------------
+// Personal finance — a separate, personal expense tracker living alongside the business books.
+// Nothing here touches invoices/payments; it's its own little ledger.
+// ---------------------------------------------------------------------------------------------
+
+// A spending/saving bucket. `kind` decides how a transaction counts on the dashboard:
+//   EXPENSE    — money spent (split further by `bucket` into NEEDS vs WANTS)
+//   INVESTMENT — money put to work (SIPs, stocks, FDs...) — counted as savings, not spending
+//   INCOME     — money coming in (salary, refunds, interest...)
+//   TRANSFER   — moving your own money around (self transfer, credit-card bill payment, money
+//                lent) — excluded from spend/income totals so nothing is double counted
+model PersonalCategory {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  kind      String  // "EXPENSE" | "INVESTMENT" | "INCOME" | "TRANSFER"
+  bucket    String  @default("WANTS") // EXPENSE only: "NEEDS" | "WANTS"
+  // Optional monthly cap for this category; 0 = no cap set.
+  monthlyBudget Decimal @default(0)
+  sortOrder Int     @default(0)
+  archived  Boolean @default(false)
+
+  transactions PersonalTransaction[]
+  rules        PersonalMerchantRule[]
+}
+
+model PersonalTransaction {
+  id          String   @id @default(cuid())
+  date        DateTime
+  description String   // raw bank narration, or what you typed for a manual entry
+  merchant    String   @default("") // cleaned-up payee name ("Zomato", "Raza Aminu")
+  amount      Decimal  // always positive
+  direction   String   // "DEBIT" (money out) | "CREDIT" (money in)
+  categoryId  String?
+  category    PersonalCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  notes       String   @default("")
+  source      String   @default("MANUAL") // "MANUAL" | "STATEMENT"
+  // date|amount|direction|narration fingerprint so re-importing the same statement (or an
+  // overlapping one) doesn't create duplicates. Null for manual entries.
+  importHash  String?  @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([date])
+  @@index([categoryId])
+}
+
+// "Anything from this merchant goes into this category" — learned whenever you label a
+// statement row with "remember" ticked, and applied automatically on every later import.
+model PersonalMerchantRule {
+  id         String           @id @default(cuid())
+  pattern    String           @unique // normalized lowercase merchant key
+  categoryId String
+  category   PersonalCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  createdAt  DateTime         @default(now())
+}
+
+// Single-row plan: your salary and how you want to split it (defaults to the 50/30/20 rule —
+// 50% needs, 30% wants / "fun money", 20% savings & investments).
+model PersonalPlan {
+  id            Int     @id @default(1)
+  monthlySalary Decimal @default(0)
+  needsPct      Int     @default(50)
+  wantsPct      Int     @default(30)
+  savingsPct    Int     @default(20)
+}
+
+// Per-month salary override, for months where take-home differs (bonus, increment, unpaid
+// leave). Months without a row use PersonalPlan.monthlySalary.
+model PersonalMonthIncome {
+  month  String  @id // "2026-11"
+  salary Decimal
+}
