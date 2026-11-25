@@ -1,4 +1,14 @@
-export class GeminiExtractError extends Error {}
+// `retryable` marks a failure as transient (every model was overloaded/rate-limited/deprecated
+// right now) rather than something wrong with this specific file or request — callers that
+// auto-retry on a schedule (the form-ingest cron) use it to decide whether to leave a row alone
+// for the next run instead of permanently flagging it after one bad-luck attempt.
+export class GeminiExtractError extends Error {
+  retryable: boolean;
+  constructor(message: string, retryable = false) {
+    super(message);
+    this.retryable = retryable;
+  }
+}
 
 // Used only if Settings has no model saved yet (shouldn't normally happen — the column has
 // its own default) — kept here as a last-resort fallback, not the source of truth.
@@ -130,7 +140,8 @@ async function callGeminiAcrossModels(
   }
   if (last) return last;
   throw new GeminiExtractError(
-    `Gemini timed out on every model tried (${models.join(", ")}) — likely a sustained outage. Try again shortly.`
+    `Gemini timed out on every model tried (${models.join(", ")}) — likely a sustained outage. Try again shortly.`,
+    true
   );
 }
 
@@ -175,10 +186,11 @@ export async function extractPurchaseBill(
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    const triedNote = MODEL_FALLBACK_STATUSES.includes(res.status)
+    const retryable = MODEL_FALLBACK_STATUSES.includes(res.status);
+    const triedNote = retryable
       ? ` Tried ${models.length > 1 ? `${models.length} models (${models.join(", ")})` : modelUsed} — all unavailable right now, try again shortly.`
       : " Check the API key in Settings is valid.";
-    throw new GeminiExtractError(`Gemini API request failed (${res.status}) on ${modelUsed}.${triedNote} ${body.slice(0, 300)}`);
+    throw new GeminiExtractError(`Gemini API request failed (${res.status}) on ${modelUsed}.${triedNote} ${body.slice(0, 300)}`, retryable);
   }
 
   const data = await res.json();

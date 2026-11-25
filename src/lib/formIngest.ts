@@ -404,6 +404,16 @@ export async function syncFormResponses(): Promise<FormIngestSummary> {
           : "Could not process this row.";
       errors.push(`${rowDisplayName || `Row ${row.rowIndex + 1}`}: ${message}`);
       flagged++;
+
+      // A transient failure (Gemini overloaded/rate-limited across every fallback model right
+      // now) gets another shot on the next run instead of being permanently flagged — the row
+      // is left uncolored and un-marked, same as a brand new row, so it's naturally retried
+      // within the next run's budget rather than needing a human to notice and clear the cell.
+      if (err instanceof GeminiExtractError && err.retryable) {
+        remaining++;
+        continue;
+      }
+
       await colorSheetRow({
         serviceAccountJson: config.serviceAccountJson,
         spreadsheetId: config.formResponsesSpreadsheetId,
