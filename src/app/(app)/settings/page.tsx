@@ -2,6 +2,7 @@ import { getSettings } from "@/lib/settings";
 import PageHeader from "@/components/PageHeader";
 import SettingsForm from "./settings-form";
 import SheetSyncForm from "./sheet-sync-form";
+import ChangePasswordForm from "./change-password-form";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ export default async function SettingsPage() {
       />
       <div className="px-8 pb-12 max-w-3xl space-y-8">
         <SettingsForm settings={settings} />
+        <ChangePasswordForm />
         <SheetSyncForm config={sheetConfig} />
         <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-2">
           <h2 className="text-sm font-semibold text-slate-800">Backup</h2>
