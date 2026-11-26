@@ -28,36 +28,6 @@ with a real URL (see below) — same code either way.
 - **Branding** — set a brand colour and upload your logo in Settings; both appear on every
   generated invoice PDF.
 
-## Personal expense tracker ("My Money")
-
-A separate, personal section in the sidebar (**Personal**). It doesn't touch any invoice data.
-
-- **Import a bank statement.** Upload a PDF, or the Excel/CSV export from net banking. With a
-  Gemini API key in Settings, Gemini reads every row of a PDF and suggests a label for each
-  payment. Excel/CSV files are read locally, then Gemini labels them.
-- **It asks you about the unclear ones.** Payments it can't place (UPI transfers to people,
-  unknown shops) are grouped by who you paid, each with a short question. One answer labels
-  the whole group, and "remember" means future statements label that payee automatically.
-  Re-importing an overlapping statement skips transactions that are already saved.
-- **Expenses vs investments vs transfers.** Expenses are split into *Needs* and *Wants*.
-  SIPs, stocks, FDs and similar count as *investments* (savings, not spending). Credit-card
-  bill payments and self transfers are *transfers* and are left out of every total.
-- **Dashboard.** Shows the month's income, spending, investments and savings rate. It
-  compares your needs/wants/savings split against your plan and shows what percent of
-  spending went to each category. It also tracks month-on-month change, shows how much
-  "fun money" you have left (and per day), and lists a few suggestions.
-- **Plan & Salary.** Set your take-home salary and how to split it (50/30/20 by default),
-  with one-off overrides for months with a bonus or leave. You can also add, rename or
-  re-bucket labels and give any category a monthly cap.
-- **Day-to-day entries.** Use the quick "Add an expense" form on the dashboard or the
-  Transactions page.
-
-**Updating an existing install:** this adds new database tables.
-- **Mac app:** run `npx prisma migrate deploy && npm run build` once in this folder.
-- **Vercel + Turso:** run
-  `turso db shell themangotheory-invoicing < prisma/migrations/20261125120000_add_personal_finance/migration.sql`
-  and then `vercel --prod`.
-
 ## Quickstart on Mac (no Terminal needed)
 
 This folder includes a double-click launcher, so you never need to open Terminal for day-to-day

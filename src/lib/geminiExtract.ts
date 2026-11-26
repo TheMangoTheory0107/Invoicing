@@ -95,9 +95,9 @@ function buildModelChain(configured: string): string[] {
   return Array.from(new Set([configured, ...FALLBACK_MODELS]));
 }
 
-async function callGeminiOnce(url: string, body: string, timeoutMs = PER_ATTEMPT_TIMEOUT_MS): Promise<Response> {
+async function callGeminiOnce(url: string, body: string): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), PER_ATTEMPT_TIMEOUT_MS);
   try {
     return await fetch(url, {
       method: "POST",
@@ -113,14 +113,13 @@ async function callGeminiOnce(url: string, body: string, timeoutMs = PER_ATTEMPT
 async function callGeminiAcrossModels(
   apiKey: string,
   models: string[],
-  body: string,
-  timeoutMs = PER_ATTEMPT_TIMEOUT_MS
+  body: string
 ): Promise<{ res: Response; modelUsed: string }> {
   let last: { res: Response; modelUsed: string } | null = null;
   for (const model of models) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
     try {
-      const res = await callGeminiOnce(url, body, timeoutMs);
+      const res = await callGeminiOnce(url, body);
       if (res.ok || !MODEL_FALLBACK_STATUSES.includes(res.status)) {
         return { res, modelUsed: model };
       }
@@ -192,46 +191,5 @@ export async function extractPurchaseBill(
     return JSON.parse(text) as ExtractedPurchaseBill;
   } catch {
     throw new GeminiExtractError("Gemini's response wasn't valid JSON — try again.");
-  }
-}
-
-// Generic structured-JSON Gemini call (same model fallback chain + error handling as above),
-// used by the personal expense tracker to read bank statements and label transactions.
-export async function callGeminiJson<T>(opts: {
-  parts: unknown[];
-  schema: unknown;
-  apiKey: string;
-  model?: string;
-  timeoutMs?: number;
-}): Promise<T> {
-  if (!opts.apiKey) {
-    throw new GeminiExtractError("No Gemini API key configured — add one in Settings first.");
-  }
-  const models = buildModelChain(opts.model || DEFAULT_GEMINI_MODEL);
-  const { res, modelUsed } = await callGeminiAcrossModels(
-    opts.apiKey,
-    models,
-    JSON.stringify({
-      contents: [{ parts: opts.parts }],
-      generationConfig: { responseMimeType: "application/json", responseSchema: opts.schema, temperature: 0.1 },
-    }),
-    opts.timeoutMs
-  );
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    const triedNote = MODEL_FALLBACK_STATUSES.includes(res.status)
-      ? ` Tried ${models.join(", ")} — all unavailable right now, try again shortly.`
-      : " Check the API key in Settings is valid.";
-    throw new GeminiExtractError(`Gemini API request failed (${res.status}) on ${modelUsed}.${triedNote} ${body.slice(0, 300)}`);
-  }
-  const data = await res.json();
-  const text = (data?.candidates?.[0]?.content?.parts || [])
-    .map((p: { text?: string }) => p.text || "")
-    .join("");
-  if (!text) throw new GeminiExtractError("Gemini didn't return any data.");
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new GeminiExtractError("Gemini's response wasn't valid JSON (it may have been cut off) — try again.");
   }
 }
