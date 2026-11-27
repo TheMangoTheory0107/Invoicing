@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { toNumber } from "@/lib/format";
 import { appendTdsTrackerRow, SheetSyncError } from "@/lib/googleSheets";
+import type { SheetSyncConfig } from "@prisma/client";
 
 export interface TdsSyncResult {
   attempted: boolean;
@@ -22,25 +24,11 @@ function sectionForRate(tdsAmount: number, grossAmount: number): { code: string;
   return code ? { code, ratePercent } : null;
 }
 
-// Appends a row to the TDS tracker workbook (a separate spreadsheet from the Sales/Commission/
-// Purchase Register) every time a creator payment withholds TDS — not just once the bill is
-// fully paid, since TDS is remitted per payment, not per invoice. A no-op (never throws) if TDS
-// tracking isn't configured, or if this particular payment didn't withhold any TDS at all.
-export async function syncPaymentToTdsTracker(params: {
-  creatorName: string;
-  panNo: string | null;
-  date: Date;
-  amount: number;
-  tdsAmount: number;
-}): Promise<TdsSyncResult> {
+async function writeTdsTrackerRow(
+  config: Pick<SheetSyncConfig, "tdsSpreadsheetId" | "serviceAccountJson">,
+  params: { creatorName: string; panNo: string | null; date: Date; amount: number; tdsAmount: number }
+): Promise<TdsSyncResult> {
   const { creatorName, panNo, date, amount, tdsAmount } = params;
-  if (tdsAmount <= 0) return { attempted: false, ok: true };
-
-  const config = await prisma.sheetSyncConfig.findUnique({ where: { id: 1 } });
-  if (!config?.enabled || !config.tdsSpreadsheetId || !config.serviceAccountJson) {
-    return { attempted: false, ok: true };
-  }
-
   const grossAmount = amount + tdsAmount;
   const section = sectionForRate(tdsAmount, grossAmount);
 
@@ -61,4 +49,75 @@ export async function syncPaymentToTdsTracker(params: {
       err instanceof SheetSyncError ? err.message : err instanceof Error ? err.message : "Could not write to the TDS tracker sheet.";
     return { attempted: true, ok: false, error: message };
   }
+}
+
+// Appends a row to the TDS tracker workbook (a separate spreadsheet from the Sales/Commission/
+// Purchase Register) right when a creator payment withholds TDS — not just once the bill is
+// fully paid, since TDS is remitted per payment, not per invoice. A no-op (never throws) if TDS
+// tracking isn't configured, or this particular payment withheld no TDS. On success, marks the
+// payment as synced so the catch-up sweep below never writes a second row for it.
+export async function syncPaymentToTdsTracker(
+  paymentId: string,
+  params: { creatorName: string; panNo: string | null; date: Date; amount: number; tdsAmount: number }
+): Promise<TdsSyncResult> {
+  if (params.tdsAmount <= 0) return { attempted: false, ok: true };
+
+  const config = await prisma.sheetSyncConfig.findUnique({ where: { id: 1 } });
+  if (!config?.enabled || !config.tdsSpreadsheetId || !config.serviceAccountJson) {
+    return { attempted: false, ok: true };
+  }
+
+  const result = await writeTdsTrackerRow(config, params);
+  if (result.ok && result.attempted) {
+    await prisma.payment.update({ where: { id: paymentId }, data: { tdsTrackerSyncedAt: new Date() } }).catch(() => {});
+  }
+  return result;
+}
+
+export interface TdsCatchUpResult {
+  attempted: boolean;
+  ok: boolean;
+  checked: number;
+  synced: number;
+  errors: string[];
+}
+
+// Safety-net sweep: finds every creator (Purchase) payment that withheld TDS and hasn't been
+// written to the tracker sheet yet — regardless of why (the live sync was off or unconfigured
+// at the time, failed, or the payment came in through bank-import reconciliation rather than
+// the payment form) — and writes each one now. Each success is marked immediately, so running
+// this any number of times — including the daily automatic check and an on-demand click on the
+// same day — can never produce a duplicate row: a payment already marked synced is simply never
+// looked at again.
+export async function catchUpTdsTracker(): Promise<TdsCatchUpResult> {
+  const config = await prisma.sheetSyncConfig.findUnique({ where: { id: 1 } });
+  if (!config?.enabled || !config.tdsSpreadsheetId || !config.serviceAccountJson) {
+    return { attempted: false, ok: true, checked: 0, synced: 0, errors: [] };
+  }
+
+  const payments = await prisma.payment.findMany({
+    where: { tdsAmount: { gt: 0 }, tdsTrackerSyncedAt: null, invoice: { type: "PURCHASE" } },
+    include: { invoice: { include: { creator: true } } },
+    orderBy: { date: "asc" },
+  });
+
+  let synced = 0;
+  const errors: string[] = [];
+  for (const payment of payments) {
+    const result = await writeTdsTrackerRow(config, {
+      creatorName: payment.invoice.creator?.name || "Unknown",
+      panNo: payment.invoice.creator?.panNo || null,
+      date: payment.date,
+      amount: toNumber(payment.amount),
+      tdsAmount: toNumber(payment.tdsAmount),
+    });
+    if (result.ok && result.attempted) {
+      await prisma.payment.update({ where: { id: payment.id }, data: { tdsTrackerSyncedAt: new Date() } });
+      synced++;
+    } else if (!result.ok) {
+      errors.push(`${payment.invoice.number}: ${result.error}`);
+    }
+  }
+
+  return { attempted: true, ok: errors.length === 0, checked: payments.length, synced, errors };
 }

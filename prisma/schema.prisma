@@ -201,6 +201,11 @@ model Payment {
   reference String?
   notes     String?
   createdAt DateTime @default(now())
+  // Set once this payment's row has actually been written to the TDS tracker sheet — the
+  // on-save sync sets it immediately on success; the catch-up sweep (for whenever the live
+  // sync was off, failed, or wasn't configured yet) only ever considers payments where this is
+  // still null, so running the sweep any number of times can never produce a duplicate row.
+  tdsTrackerSyncedAt DateTime?
 }
 
 // Simple payroll tracking — who gets paid, how much per month, and a log of what was actually

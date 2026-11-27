@@ -52,6 +52,12 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     | { ok: false; error: string }
     | null
   >(null);
+  const [tdsCatchingUp, setTdsCatchingUp] = useState(false);
+  const [tdsCatchUpResult, setTdsCatchUpResult] = useState<
+    | { ok: true; checked: number; synced: number; errors: string[] }
+    | { ok: false; error: string }
+    | null
+  >(null);
   const [formSyncing, setFormSyncing] = useState(false);
   const [formSyncLooping, setFormSyncLooping] = useState(false);
   const formSyncStopRef = useRef(false);
@@ -148,6 +154,15 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
     const data = await res.json();
     setRefBackfilling(false);
     setRefBackfillResult(res.ok ? { ok: true, ...data } : { ok: false, error: data.error || "Could not run the backfill." });
+  }
+
+  async function onTdsCatchUp() {
+    setTdsCatchingUp(true);
+    setTdsCatchUpResult(null);
+    const res = await fetch("/api/settings/sheets/tds-catchup", { method: "POST" });
+    const data = await res.json();
+    setTdsCatchingUp(false);
+    setTdsCatchUpResult(res.ok ? { ok: true, ...data } : { ok: false, error: data.error || "Could not run the catch-up." });
   }
 
   type SyncRoundResult =
@@ -531,7 +546,11 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
           creates one). The section code is worked out from the TDS rate actually withheld on
           that payment: 10% → 194J, 2% → 194H, 1% → 194C. The Total column written is the gross
           amount (the payment plus the TDS withheld on it), not the net cash paid. This also
-          requires &quot;Enable automatic Sheets sync&quot; above to be turned on.
+          requires &quot;Enable automatic Sheets sync&quot; above to be turned on. Anything
+          missed live (sync was off, failed, or a payment came in through bank-import instead of
+          the payment form) is automatically swept up once a day, and you can also trigger that
+          sweep immediately below — safe to run any number of times, since a payment already
+          written is never written again.
         </p>
         <label className="block max-w-md mt-3">
           <span className="block text-xs font-medium text-slate-600 mb-1">
@@ -546,6 +565,39 @@ export default function SheetSyncForm({ config }: { config: SheetSyncConfig }) {
             className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
           />
         </label>
+        <div className="flex items-center gap-3 mt-3">
+          <button
+            type="button"
+            onClick={onTdsCatchUp}
+            disabled={tdsCatchingUp || !form.tdsSpreadsheetId || !form.serviceAccountJson}
+            className="rounded-md border border-slate-300 text-sm font-medium px-4 py-2 hover:bg-slate-50 disabled:opacity-60"
+          >
+            {tdsCatchingUp ? "Running…" : "Catch up TDS tracker now"}
+          </button>
+          <span className="text-xs text-slate-400">Writes any TDS payment not yet in the sheet. Safe to re-run.</span>
+        </div>
+        {tdsCatchUpResult && (
+          <div
+            className={`rounded-md px-3 py-2 text-sm mt-2 ${
+              !tdsCatchUpResult.ok ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            {tdsCatchUpResult.ok ? (
+              <>
+                Checked {tdsCatchUpResult.checked} unsynced payment(s), wrote {tdsCatchUpResult.synced} row(s).
+                {tdsCatchUpResult.errors.length > 0 && (
+                  <div className="mt-1 text-xs space-y-0.5">
+                    {tdsCatchUpResult.errors.map((e, i) => (
+                      <div key={i}>{e}</div>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              tdsCatchUpResult.error
+            )}
+          </div>
+        )}
       </div>
 
       <div className="border-t border-slate-100 pt-4">

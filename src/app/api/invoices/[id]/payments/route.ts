@@ -27,7 +27,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "This invoice is cancelled — reactivate it before recording a payment." }, { status: 400 });
   }
 
-  await prisma.payment.create({
+  const payment = await prisma.payment.create({
     data: {
       invoiceId: params.id,
       date: parseDateOnly(parsed.data.date),
@@ -42,10 +42,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const { invoice: updated, syncResult } = await recomputeInvoiceStatus(params.id);
 
   // TDS is remitted to the government per payment, not per invoice — so the tracker gets a row
-  // every time a creator payment withholds TDS, not just once the bill is fully paid.
+  // every time a creator payment withholds TDS, not just once the bill is fully paid. Anything
+  // missed here (sync was off, failed, or wasn't configured yet) is swept up later by
+  // catchUpTdsTracker, which only ever looks at payments not yet marked synced.
   const tdsSyncResult =
     updated.type === "PURCHASE" && parsed.data.tdsAmount > 0
-      ? await syncPaymentToTdsTracker({
+      ? await syncPaymentToTdsTracker(payment.id, {
           creatorName: updated.creator?.name || "Unknown",
           panNo: updated.creator?.panNo || null,
           date: parseDateOnly(parsed.data.date),
